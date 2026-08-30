@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertSession } from "@/lib/session";
 import { DEFAULT_FEE_CONFIG } from "@/lib/fees";
+import { parseSpendPaste } from "@/lib/ad-spend-paste";
 import { parsePriceList, priceListToRows } from "@/lib/price-list";
 import {
   applyCostTiers,
@@ -324,4 +325,78 @@ export async function addManualAdSpend(
   revalidatePath("/dashboard/ads");
   revalidatePath("/dashboard");
   return { ok: true, message: "Ad spend recorded." };
+}
+
+const PLATFORMS = ["meta", "tiktok", "google", "other"] as const;
+
+/**
+ * Bulk entry for ad spend copied out of an ads platform. One row per day; pasting
+ * the same range again overwrites those days rather than double-counting them, so a
+ * correction is just another paste.
+ */
+export async function importAdSpendPaste(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const storeId = formData.get("storeId")?.toString();
+  if (!storeId) return { ok: false, message: "Missing store." };
+
+  const platform = formData.get("platform")?.toString() ?? "meta";
+  if (!PLATFORMS.includes(platform as (typeof PLATFORMS)[number])) {
+    return { ok: false, message: "Unknown platform." };
+  }
+
+  const { rows, skipped } = parseSpendPaste(formData.get("rows")?.toString() ?? "");
+  if (rows.length === 0) {
+    return {
+      ok: false,
+      message:
+        "No rows recognised. Each line needs a date and an amount, for example: 2026-08-01<tab>124.53",
+    };
+  }
+
+  // Several campaigns can report on the same day; sum them into one figure per day.
+  const byDate = new Map<string, number>();
+  for (const row of rows) {
+    byDate.set(row.date, (byDate.get(row.date) ?? 0) + row.spend);
+  }
+
+  const campaignId = "manual:pasted";
+  await prisma.$transaction(
+    [...byDate.entries()].map(([date, spend]) =>
+      prisma.adSpendEntry.upsert({
+        where: {
+          storeId_date_platform_campaignId: {
+            storeId,
+            date: new Date(`${date}T00:00:00.000Z`),
+            platform,
+            campaignId,
+          },
+        },
+        create: {
+          storeId,
+          date: new Date(`${date}T00:00:00.000Z`),
+          platform,
+          campaignId,
+          campaignName: "Pasted",
+          spend,
+        },
+        update: { spend },
+      }),
+    ),
+  );
+
+  revalidatePath("/dashboard/ads");
+  revalidatePath("/dashboard");
+
+  const dates = [...byDate.keys()].sort();
+  const total = [...byDate.values()].reduce((sum, value) => sum + value, 0);
+  return {
+    ok: true,
+    message:
+      `Imported ${byDate.size} days (${dates[0]} to ${dates[dates.length - 1]}), ` +
+      `${total.toFixed(2)} total.` +
+      (skipped.length ? ` Skipped ${skipped.length} unreadable line(s): ${skipped.slice(0, 5).join(", ")}.` : ""),
+  };
 }

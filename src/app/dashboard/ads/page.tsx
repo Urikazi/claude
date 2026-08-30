@@ -6,6 +6,7 @@ import { round2 } from "@/lib/fees";
 import { Card, Empty, Stat, Td, Th } from "@/components/ui";
 import { RangePicker } from "@/components/range-picker";
 import { ManualAdSpendForm } from "@/components/manual-ad-spend-form";
+import { AdSpendPasteForm } from "@/components/ad-spend-paste-form";
 
 export const dynamic = "force-dynamic";
 
@@ -101,7 +102,11 @@ export default async function AdsPage({
         )}
       </Card>
 
-      <Card title="Add spend from another channel">
+      <Card title="Paste spend from Ads Manager">
+        <AdSpendPasteForm storeId={store.id} />
+      </Card>
+
+      <Card title="Add a single day">
         <ManualAdSpendForm storeId={store.id} />
       </Card>
 
