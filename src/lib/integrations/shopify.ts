@@ -54,6 +54,25 @@ const tokenCache = new Map<string, CachedToken>();
 /** Refresh a little early rather than racing the expiry mid-sync. */
 const TOKEN_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
 
+/**
+ * Shopify answers a failed token request with a full HTML error page, and pasting
+ * that into the UI buries the one word that matters under a stylesheet. Pull out the
+ * OAuth error code, falling back to the page title and then a short excerpt.
+ */
+export function summarizeOAuthError(body: string): string {
+  try {
+    const json = JSON.parse(body) as { error?: string; error_description?: string };
+    if (json.error) return json.error_description ?? json.error;
+  } catch {
+    // Not JSON; fall through to the HTML shapes below.
+  }
+  const oauth = body.match(/Oauth error (\w+)/i);
+  if (oauth) return oauth[1];
+  const title = body.match(/<title>([^<]{0,200})<\/title>/i);
+  if (title) return title[1].trim();
+  return body.replace(/\s+/g, " ").slice(0, 200);
+}
+
 async function mintAccessToken(
   domain: string,
   clientId: string,
@@ -75,19 +94,28 @@ async function mintAccessToken(
   });
 
   if (!response.ok) {
-    const detail = await response.text();
+    const body = await response.text();
+    const detail = summarizeOAuthError(body);
+
     // The usual cause: the app exists in the Dev Dashboard but was never installed on
     // this store. Client credentials only work against a store the app is installed on.
-    if (detail.includes("app_not_installed")) {
+    if (body.includes("app_not_installed")) {
       throw new ShopifyError(
         `the app is not installed on ${domain}. Install it on the store from the Dev ` +
           `Dashboard, then sync again.`,
       );
     }
+    if (detail === "invalid_client" || detail === "invalid_request") {
+      throw new ShopifyError(
+        `the client ID or secret was rejected (${detail}). If you revoked or rotated the ` +
+          `secret in the Dev Dashboard, generate a new one and paste it into the client ` +
+          `secret field — the stored one is no longer valid.`,
+      );
+    }
     if (response.status === 401 || response.status === 400) {
       throw new ShopifyError(
-        `could not mint an access token (${response.status}). Check the client ID and secret, ` +
-          `and that the app and store belong to the same organization. ${detail}`,
+        `could not mint an access token (${response.status}: ${detail}). Check the client ID ` +
+          `and secret, and that the app and store belong to the same organization.`,
       );
     }
     throw new ShopifyError(`token request failed: ${response.status} ${detail}`);
