@@ -12,6 +12,7 @@ import {
   syncMetaAds,
   syncShopifyOrders,
   syncShopifyProducts,
+  NotConfiguredError,
 } from "@/lib/sync";
 
 export type ActionState = { ok: boolean; message: string } | null;
@@ -214,21 +215,29 @@ export async function runSync(
   }
 
   const messages: string[] = [];
+  const skipped: string[] = [];
   const errors: string[] = [];
   for (const task of tasks) {
     try {
       messages.push((await task()).message);
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
+      if (error instanceof NotConfiguredError) skipped.push(error.message);
+      else errors.push(error instanceof Error ? error.message : String(error));
     }
   }
 
   revalidatePath("/dashboard", "layout");
-  if (errors.length && !messages.length) return { ok: false, message: errors.join(" | ") };
-  return {
-    ok: errors.length === 0,
-    message: [...messages, ...errors].join(" | "),
-  };
+
+  // Only a real failure is a failure. Syncing what is connected and skipping what
+  // is not is the normal state of a dashboard being filled in one source at a time.
+  const parts = [...messages, ...errors];
+  if (skipped.length) {
+    parts.push(`Not set up yet: ${[...new Set(skipped)].join(", ")}.`);
+  }
+  if (!messages.length && !errors.length && skipped.length) {
+    return { ok: false, message: `Nothing to sync. Not set up yet: ${[...new Set(skipped)].join(", ")}.` };
+  }
+  return { ok: errors.length === 0, message: parts.join(" | ") };
 }
 
 export async function resnapshotCosts(storeId: string): Promise<ActionState> {

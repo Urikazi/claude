@@ -13,6 +13,13 @@ import * as paypal from "@/lib/integrations/paypal";
 
 export type SyncResult = { source: string; records: number; message: string };
 
+/**
+ * A source the user simply has not set up yet. Distinct from a failure: syncing
+ * everything when only Shopify is connected is a normal, successful outcome, and
+ * reporting it as an error trains people to ignore the error colour.
+ */
+export class NotConfiguredError extends Error {}
+
 type StoreShopifyFields = {
   shopifyDomain: string | null;
   shopifyAccessToken: string | null;
@@ -25,10 +32,7 @@ function shopifyCredentials(store: StoreShopifyFields): shopify.ShopifyCredentia
   const hasAuth =
     store.shopifyAccessToken || (store.shopifyClientId && store.shopifyClientSecret);
   if (!store.shopifyDomain || !hasAuth) {
-    throw new Error(
-      "Shopify is not configured for this store. Add the store domain plus the client ID " +
-        "and secret from your app's Dev Dashboard settings.",
-    );
+    throw new NotConfiguredError("Shopify");
   }
   return {
     domain: store.shopifyDomain,
@@ -202,7 +206,7 @@ export async function syncMetaAds(
   const startedAt = new Date();
   const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
   if (!store.metaAdAccountId || !store.metaAccessToken) {
-    throw new Error("Meta Ads credentials are not configured for this store.");
+    throw new NotConfiguredError("Meta Ads");
   }
 
   const since = new Date(Date.now() - sinceDays * 86_400_000);
@@ -302,7 +306,7 @@ export async function reconcileProcessorFees(
   }
 
   if (notes.length === 0) {
-    throw new Error("No Stripe or PayPal credentials are configured for this store.");
+    throw new NotConfiguredError("Stripe or PayPal");
   }
 
   const message = `${notes.join(", ")}. Matched ${matched} orders to real fees.`;
