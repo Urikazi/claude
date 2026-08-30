@@ -56,14 +56,3 @@ export function verifySessionToken(token: string | undefined, secret: string): b
 
   return Number(expiresAt) > Date.now();
 }
-
-/**
- * Missing configuration must fail closed. Returning "no password set = open access"
- * would silently expose a deployment whose env vars did not get set.
- */
-export function authConfig(): { hash: string; secret: string } | null {
-  const hash = process.env.DASHBOARD_PASSWORD_HASH;
-  const secret = process.env.SESSION_SECRET;
-  if (!hash || !secret) return null;
-  return { hash, secret };
-}

@@ -8,7 +8,7 @@ reports what actually landed in your pocket.
 
 | Input | Source |
 | --- | --- |
-| Daily revenue, orders, refunds | Shopify Admin GraphQL API (custom app) |
+| Daily revenue, orders, refunds | Shopify Admin GraphQL API (Dev Dashboard app) |
 | Ad spend, impressions, clicks | Meta Marketing API (campaign-level, daily) |
 | Payment processing fees | Stripe balance transactions, PayPal transaction search |
 | Shopify transaction fee | Configurable, defaults to 0.6% |
@@ -28,53 +28,47 @@ that was not paid through Shopify Payments.
 
 ## Getting started
 
-Requires Node.js 20+ and a Postgres database (any provider — Neon, Supabase, Railway, or a
-local server).
+Requires Node.js 20+ and a Postgres database (Neon, Supabase, Railway, or a local server).
 
 ```bash
 npm install
-cp .env.example .env                       # then set DATABASE_URL
-npm run auth:hash -- 'your password here'  # prints the three auth secrets
-```
-
-Paste the three printed lines into `.env`, then:
-
-```bash
+cp .env.example .env        # set DATABASE_URL
 npx prisma migrate deploy   # create the tables
 npm run db:seed             # optional: 90 days of demo data
 npm run dev
 ```
 
-Open http://localhost:3000 and sign in with the password you chose.
+Open http://localhost:3000. On first visit you choose a password; after that you sign in with it.
 
 The demo seed gives you a fully populated dashboard so you can see the shape of the thing before
 connecting anything. Delete the "Demo Store" row once you connect real credentials.
 
 ## Deploying
 
-The dashboard holds live API credentials, so it requires a password before it will show anything.
-`DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET` must both be set or every page stays locked — it
-fails closed rather than defaulting to open.
+The dashboard holds live API credentials, so it is locked behind a password and fails closed:
+until one is set, every route redirects to `/setup`, and nothing is readable.
 
 1. Push this repo to GitHub and import it at [vercel.com/new](https://vercel.com/new).
-2. Add a Postgres database (Vercel's Neon integration sets `DATABASE_URL` for you), or paste a
-   connection string from any provider.
-3. Set the environment variables from `npm run auth:hash`: `DASHBOARD_PASSWORD_HASH`,
-   `SESSION_SECRET` and `SYNC_SECRET`.
-4. Deploy. The `vercel-build` script runs `prisma migrate deploy` before the build, so the
-   schema is created on first deploy.
+2. Add a Postgres database and set `DATABASE_URL` (Vercel's Neon integration sets it for you).
+3. Deploy. `vercel-build` runs `prisma migrate deploy` first, so the schema is created for you.
+4. Open the deployed URL and set your password. **Do this immediately** — until you do, anyone
+   who reaches the URL can claim it. Once set, `/setup` refuses to run again.
 
-To sync automatically every morning, add `vercel.json`:
+`DATABASE_URL` is the only variable you must set by hand. The password hash and session key are
+generated on first run and stored in the database.
+
+Prefer managing secrets as environment variables? Set `DASHBOARD_PASSWORD_HASH` and
+`SESSION_SECRET` (generate both with `npm run auth:hash -- 'your password'`) and they take
+precedence over the database, skipping the setup page entirely.
+
+To sync automatically every morning, set `SYNC_SECRET` and add `vercel.json`:
 
 ```json
 { "crons": [{ "path": "/api/sync?source=all", "schedule": "0 6 * * *" }] }
 ```
 
-and have the cron send `Authorization: Bearer $SYNC_SECRET`. Without a valid secret or a signed-in
-browser session, `/api/sync` returns 401.
-
-Rotating `SESSION_SECRET` invalidates every existing session, which is how you sign out a lost
-device.
+with the cron sending `Authorization: Bearer $SYNC_SECRET`. Without that secret or a signed-in
+session, `/api/sync` returns 401.
 
 ## Connecting your accounts
 
@@ -147,10 +141,12 @@ the **Ad spend** page and is included in net profit exactly like synced spend.
 
 ## Notes
 
-- SQLite is the default so the app runs with no external services. For production, change the
-  `datasource` provider in `prisma/schema.prisma` to `postgresql` and re-run the migration.
-- There is no authentication. Put it behind your own auth layer, a VPN, or platform access
-  controls before exposing it — the settings page holds live API credentials.
+- Access is a single shared password, appropriate for one owner. There are no user accounts or
+  roles; everyone who signs in sees and can change everything.
+- Rotating `SESSION_SECRET`, or clearing the `auth.session_secret` row, invalidates every existing
+  session — that is how you sign out a lost device.
+- Provider credentials are stored in the database in plain text. Anyone with database access has
+  them, so treat `DATABASE_URL` as being as sensitive as the API keys themselves.
 - Order-level profit on the Orders page excludes ad spend, which is only meaningful at the account
   level. Net profit including ads is on the overview.
 
@@ -163,3 +159,4 @@ the **Ad spend** page and is included in net profit exactly like synced spend.
 | `npm run db:migrate` | Create/apply a migration |
 | `npm run db:seed` | Load demo data |
 | `npm run db:studio` | Browse the database |
+| `npm run auth:hash` | Generate auth secrets for env-var-managed deploys |

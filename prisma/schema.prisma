@@ -7,6 +7,15 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Deployment-wide settings that must outlive a serverless instance but have no
+/// natural home on a store: the owner's password hash and the session signing key,
+/// both set on first run so deploying needs no shell access.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 model Store {
   id       String @id @default(cuid())
   name     String
