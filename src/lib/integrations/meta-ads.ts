@@ -5,7 +5,12 @@
  * `ads_read`. The ad account id is the `act_...` value from Ads Manager.
  */
 
-export const META_API_VERSION = "v21.0";
+/**
+ * The Marketing API retires versions on roughly a 90-day window, far faster than the
+ * two years Graph API versions get, so this needs checking a few times a year. An
+ * expired version does not error loudly — calls quietly fall back to an older one.
+ */
+export const META_API_VERSION = "v25.0";
 
 export type MetaCredentials = {
   adAccountId: string;
