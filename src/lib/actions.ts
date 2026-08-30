@@ -59,6 +59,8 @@ const credentialsSchema = z.object({
   name: z.string().min(1),
   currency: z.string().min(1).max(3),
   shopifyDomain: z.string().optional(),
+  shopifyClientId: z.string().optional(),
+  shopifyClientSecret: z.string().optional(),
   shopifyAccessToken: z.string().optional(),
   metaAdAccountId: z.string().optional(),
   metaAccessToken: z.string().optional(),
@@ -75,17 +77,17 @@ function keepIfBlank(value: string | undefined): string | undefined {
 }
 
 /**
- * The Admin API access token (`shpat_`) is easy to confuse with the API secret key
- * (`shpss_`) sitting right below it on the same Shopify screen. The secret key only
- * signs webhooks, so using it here would fail later as an opaque 401 from the sync.
+ * The optional legacy field takes a permanent `shpat_` token. Pasting the client
+ * secret (`shpss_`) there instead is the easy mistake, and it surfaces much later as
+ * an opaque 401 mid-sync, so name the right field now.
  */
 function describeShopifyTokenProblem(token: string | undefined): string | null {
   if (!token) return null;
   if (/^shp(at|ca|pa)_/.test(token)) return null;
   if (token.startsWith("shpss_")) {
-    return "That is the Shopify API secret key, not the Admin API access token. Use the value under 'Admin API access token' (starts with shpat_).";
+    return "That is a client secret, not an access token. Put it in the 'Client secret' field and leave the access token blank.";
   }
-  return "Shopify Admin API access tokens start with shpat_. Check you copied the Admin API access token.";
+  return "Admin API access tokens start with shpat_. Leave this blank unless you have a legacy custom app.";
 }
 
 export async function updateStoreSettings(
@@ -97,6 +99,8 @@ export async function updateStoreSettings(
     name: formData.get("name"),
     currency: formData.get("currency"),
     shopifyDomain: formData.get("shopifyDomain")?.toString(),
+    shopifyClientId: formData.get("shopifyClientId")?.toString(),
+    shopifyClientSecret: formData.get("shopifyClientSecret")?.toString(),
     shopifyAccessToken: formData.get("shopifyAccessToken")?.toString(),
     metaAdAccountId: formData.get("metaAdAccountId")?.toString(),
     metaAccessToken: formData.get("metaAccessToken")?.toString(),
@@ -118,6 +122,8 @@ export async function updateStoreSettings(
       name: data.name,
       currency: data.currency.toUpperCase(),
       shopifyDomain: keepIfBlank(data.shopifyDomain),
+      shopifyClientId: keepIfBlank(data.shopifyClientId),
+      shopifyClientSecret: keepIfBlank(data.shopifyClientSecret),
       shopifyAccessToken: keepIfBlank(data.shopifyAccessToken),
       metaAdAccountId: keepIfBlank(data.metaAdAccountId),
       metaAccessToken: keepIfBlank(data.metaAccessToken),

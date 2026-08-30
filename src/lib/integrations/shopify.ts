@@ -12,9 +12,22 @@
  */
 export const SHOPIFY_API_VERSION = "2026-07";
 
+/**
+ * Two ways to authenticate, in the order Shopify introduced them:
+ *
+ * - `clientId` + `clientSecret` — Dev Dashboard apps. There is no token to copy out
+ *   of the UI; we mint one with the client credentials grant. Requires the app and
+ *   the store to sit in the same Shopify organization.
+ * - `accessToken` — legacy admin-created custom apps (`shpat_`), permanent. Shopify
+ *   no longer lets you create these, but existing ones keep working.
+ *
+ * A stored access token wins, so an existing install keeps working untouched.
+ */
 export type ShopifyCredentials = {
   domain: string;
-  accessToken: string;
+  accessToken?: string | null;
+  clientId?: string | null;
+  clientSecret?: string | null;
 };
 
 class ShopifyError extends Error {
@@ -23,19 +36,98 @@ class ShopifyError extends Error {
   }
 }
 
+export function normalizeDomain(domain: string): string {
+  return domain
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "");
+}
+
+type CachedToken = { token: string; expiresAt: number };
+
+/**
+ * Client-credentials tokens last 24h, so minting one per API call would be a waste
+ * of a round trip. Keyed by domain+client so several stores can cache side by side.
+ */
+const tokenCache = new Map<string, CachedToken>();
+
+/** Refresh a little early rather than racing the expiry mid-sync. */
+const TOKEN_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
+
+async function mintAccessToken(
+  domain: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<string> {
+  const cacheKey = `${domain}:${clientId}`;
+  const cached = tokenCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.token;
+
+  const response = await fetch(`https://${domain}/admin/oauth/access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    if (response.status === 401 || response.status === 400) {
+      throw new ShopifyError(
+        `could not mint an access token (${response.status}). Check the client ID and secret, ` +
+          `and that the app and store belong to the same organization. ${detail}`,
+      );
+    }
+    throw new ShopifyError(`token request failed: ${response.status} ${detail}`);
+  }
+
+  const payload = (await response.json()) as {
+    access_token?: string;
+    expires_in?: number;
+  };
+  if (!payload.access_token) throw new ShopifyError("token response had no access_token");
+
+  // Shopify returns 86399s; fall back to that if the field is ever missing.
+  const lifetimeMs = (payload.expires_in ?? 86399) * 1000;
+  tokenCache.set(cacheKey, {
+    token: payload.access_token,
+    expiresAt: Date.now() + Math.max(lifetimeMs - TOKEN_EXPIRY_MARGIN_MS, 0),
+  });
+  return payload.access_token;
+}
+
+async function resolveAccessToken(credentials: ShopifyCredentials): Promise<string> {
+  if (credentials.accessToken) return credentials.accessToken;
+
+  const { clientId, clientSecret } = credentials;
+  if (clientId && clientSecret) {
+    return mintAccessToken(normalizeDomain(credentials.domain), clientId, clientSecret);
+  }
+
+  throw new ShopifyError(
+    "no credentials configured. Add the client ID and secret from your app's Dev Dashboard settings.",
+  );
+}
+
+
 async function graphql<T>(
   credentials: ShopifyCredentials,
   query: string,
   variables: Record<string, unknown> = {},
 ): Promise<T> {
-  const domain = credentials.domain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const domain = normalizeDomain(credentials.domain);
+  const accessToken = await resolveAccessToken(credentials);
   const response = await fetch(
     `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Shopify-Access-Token": credentials.accessToken,
+        "X-Shopify-Access-Token": accessToken,
       },
       body: JSON.stringify({ query, variables }),
       cache: "no-store",

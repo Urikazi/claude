@@ -22,10 +22,12 @@ export type StoreSettings = {
   name: string;
   currency: string;
   shopifyDomain: string | null;
+  shopifyClientId: string | null;
   metaAdAccountId: string | null;
   paypalClientId: string | null;
   paypalLiveMode: boolean;
   hasShopifyToken: boolean;
+  hasShopifyClientSecret: boolean;
   hasMetaToken: boolean;
   hasStripeKey: boolean;
   hasPaypalSecret: boolean;
@@ -62,9 +64,11 @@ export function ConnectionsForm({ store }: { store: StoreSettings }) {
       <div className="space-y-3 border-t border-line pt-5">
         <h3 className="text-sm font-semibold">Shopify</h3>
         <p className="text-xs text-muted">
-          Shopify admin → Settings → Apps and sales channels → Develop apps → create an app with
-          the <code>read_orders</code>, <code>read_all_orders</code> and <code>read_products</code>{" "}
-          Admin API scopes, then install it and copy the access token.
+          In the Shopify Dev Dashboard, open your app → App settings → Credentials, and copy the
+          Client ID and a Secret. The app needs the <code>read_orders</code>,{" "}
+          <code>read_all_orders</code> and <code>read_products</code> scopes, and it must live in
+          the same organization as the store. Access tokens are minted automatically and refreshed
+          every 24 hours.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Store domain">
@@ -75,7 +79,23 @@ export function ConnectionsForm({ store }: { store: StoreSettings }) {
               className={inputClass}
             />
           </Field>
-          <Field label="Admin API access token">
+          <Field label="Client ID">
+            <input
+              name="shopifyClientId"
+              defaultValue={store.shopifyClientId ?? ""}
+              placeholder="32-character client ID"
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Client secret">
+            <input
+              name="shopifyClientSecret"
+              type="password"
+              placeholder={secretPlaceholder(store.hasShopifyClientSecret)}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Admin API access token (legacy apps only)">
             <input
               name="shopifyAccessToken"
               type="password"
@@ -84,6 +104,11 @@ export function ConnectionsForm({ store }: { store: StoreSettings }) {
             />
           </Field>
         </div>
+        <p className="text-xs text-muted">
+          Leave the access token blank unless you have an older admin-created custom app with a
+          permanent <code>shpat_</code> token. If set, it takes precedence over the client
+          credentials above.
+        </p>
       </div>
 
       <div className="space-y-3 border-t border-line pt-5">

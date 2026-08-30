@@ -13,6 +13,31 @@ import * as paypal from "@/lib/integrations/paypal";
 
 export type SyncResult = { source: string; records: number; message: string };
 
+type StoreShopifyFields = {
+  shopifyDomain: string | null;
+  shopifyAccessToken: string | null;
+  shopifyClientId: string | null;
+  shopifyClientSecret: string | null;
+};
+
+/** Either auth style is fine; the client picks whichever the store has. */
+function shopifyCredentials(store: StoreShopifyFields): shopify.ShopifyCredentials {
+  const hasAuth =
+    store.shopifyAccessToken || (store.shopifyClientId && store.shopifyClientSecret);
+  if (!store.shopifyDomain || !hasAuth) {
+    throw new Error(
+      "Shopify is not configured for this store. Add the store domain plus the client ID " +
+        "and secret from your app's Dev Dashboard settings.",
+    );
+  }
+  return {
+    domain: store.shopifyDomain,
+    accessToken: store.shopifyAccessToken,
+    clientId: store.shopifyClientId,
+    clientSecret: store.shopifyClientSecret,
+  };
+}
+
 async function logSync(
   storeId: string,
   source: string,
@@ -29,14 +54,7 @@ async function logSync(
 export async function syncShopifyProducts(storeId: string): Promise<SyncResult> {
   const startedAt = new Date();
   const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
-  if (!store.shopifyDomain || !store.shopifyAccessToken) {
-    throw new Error("Shopify credentials are not configured for this store.");
-  }
-
-  const credentials = {
-    domain: store.shopifyDomain,
-    accessToken: store.shopifyAccessToken,
-  };
+  const credentials = shopifyCredentials(store);
   const products = await shopify.fetchProducts(credentials);
   let count = 0;
 
@@ -101,16 +119,10 @@ export async function syncShopifyOrders(
     where: { id: storeId },
     include: { feeConfig: true },
   });
-  if (!store.shopifyDomain || !store.shopifyAccessToken) {
-    throw new Error("Shopify credentials are not configured for this store.");
-  }
-
+  const credentials = shopifyCredentials(store);
   const rates = toFeeRates(store.feeConfig);
   const since = new Date(Date.now() - sinceDays * 86_400_000);
-  const orders = await shopify.fetchOrders(
-    { domain: store.shopifyDomain, accessToken: store.shopifyAccessToken },
-    since,
-  );
+  const orders = await shopify.fetchOrders(credentials, since);
 
   // Cache the variant lookup so a large import does not issue a query per line item.
   const variants = await prisma.productVariant.findMany({

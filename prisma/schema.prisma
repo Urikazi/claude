@@ -12,9 +12,13 @@ model Store {
   name     String
   currency String @default("USD")
 
-  // Shopify custom app credentials
-  shopifyDomain      String? // e.g. my-store.myshopify.com
-  shopifyAccessToken String?
+  // Shopify. Dev Dashboard apps authenticate with a client ID + secret and mint
+  // 24-hour tokens via the client credentials grant. Legacy admin-created custom
+  // apps instead have a permanent shpat_ token, which still works if present.
+  shopifyDomain       String? // e.g. my-store.myshopify.com
+  shopifyClientId     String?
+  shopifyClientSecret String?
+  shopifyAccessToken  String?
 
   // Meta Ads
   metaAdAccountId String? // e.g. act_123456789
