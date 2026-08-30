@@ -74,6 +74,20 @@ function keepIfBlank(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+/**
+ * The Admin API access token (`shpat_`) is easy to confuse with the API secret key
+ * (`shpss_`) sitting right below it on the same Shopify screen. The secret key only
+ * signs webhooks, so using it here would fail later as an opaque 401 from the sync.
+ */
+function describeShopifyTokenProblem(token: string | undefined): string | null {
+  if (!token) return null;
+  if (/^shp(at|ca|pa)_/.test(token)) return null;
+  if (token.startsWith("shpss_")) {
+    return "That is the Shopify API secret key, not the Admin API access token. Use the value under 'Admin API access token' (starts with shpat_).";
+  }
+  return "Shopify Admin API access tokens start with shpat_. Check you copied the Admin API access token.";
+}
+
 export async function updateStoreSettings(
   _prev: ActionState,
   formData: FormData,
@@ -94,6 +108,10 @@ export async function updateStoreSettings(
   if (!parsed.success) return { ok: false, message: "Check the store name and currency." };
 
   const data = parsed.data;
+
+  const tokenError = describeShopifyTokenProblem(keepIfBlank(data.shopifyAccessToken));
+  if (tokenError) return { ok: false, message: tokenError };
+
   await prisma.store.update({
     where: { id: data.storeId },
     data: {
