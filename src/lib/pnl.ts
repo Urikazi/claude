@@ -1,0 +1,280 @@
+import { prisma } from "@/lib/db";
+import { round2 } from "@/lib/fees";
+
+export type DateRange = { from: Date; to: Date };
+
+export type PnlTotals = {
+  orders: number;
+  units: number;
+  grossRevenue: number;
+  discounts: number;
+  refunds: number;
+  shippingCharged: number;
+  taxes: number;
+  netRevenue: number;
+  cogs: number;
+  shippingCost: number;
+  handlingCost: number;
+  processorFees: number;
+  shopifyFees: number;
+  adSpend: number;
+  grossProfit: number;
+  netProfit: number;
+  margin: number;
+  roas: number;
+  poas: number;
+  aov: number;
+  cpa: number;
+};
+
+export type PnlDaily = PnlTotals & { date: string };
+
+export type PnlReport = {
+  totals: PnlTotals;
+  daily: PnlDaily[];
+  adSpendByPlatform: { platform: string; spend: number }[];
+  feesBreakdown: { gateway: string; orders: number; fees: number }[];
+};
+
+const EMPTY: Omit<PnlTotals, "margin" | "roas" | "poas" | "aov" | "cpa"> = {
+  orders: 0,
+  units: 0,
+  grossRevenue: 0,
+  discounts: 0,
+  refunds: 0,
+  shippingCharged: 0,
+  taxes: 0,
+  netRevenue: 0,
+  cogs: 0,
+  shippingCost: 0,
+  handlingCost: 0,
+  processorFees: 0,
+  shopifyFees: 0,
+  adSpend: 0,
+  grossProfit: 0,
+  netProfit: 0,
+};
+
+function dayKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/// Derives the ratios that only make sense once the sums are final.
+function finalize(base: typeof EMPTY): PnlTotals {
+  const totalCogs = base.cogs + base.shippingCost + base.handlingCost;
+  const totalFees = base.processorFees + base.shopifyFees;
+  const grossProfit = base.netRevenue - totalCogs - totalFees;
+  const netProfit = grossProfit - base.adSpend;
+
+  return {
+    ...base,
+    grossProfit: round2(grossProfit),
+    netProfit: round2(netProfit),
+    grossRevenue: round2(base.grossRevenue),
+    discounts: round2(base.discounts),
+    refunds: round2(base.refunds),
+    shippingCharged: round2(base.shippingCharged),
+    taxes: round2(base.taxes),
+    netRevenue: round2(base.netRevenue),
+    cogs: round2(base.cogs),
+    shippingCost: round2(base.shippingCost),
+    handlingCost: round2(base.handlingCost),
+    processorFees: round2(base.processorFees),
+    shopifyFees: round2(base.shopifyFees),
+    adSpend: round2(base.adSpend),
+    margin: base.netRevenue > 0 ? round2((netProfit / base.netRevenue) * 100) : 0,
+    roas: base.adSpend > 0 ? round2(base.netRevenue / base.adSpend) : 0,
+    // Profit on ad spend: how much net profit each currency unit of ads returned.
+    poas: base.adSpend > 0 ? round2(grossProfit / base.adSpend) : 0,
+    aov: base.orders > 0 ? round2(base.netRevenue / base.orders) : 0,
+    cpa: base.orders > 0 ? round2(base.adSpend / base.orders) : 0,
+  };
+}
+
+export async function buildPnlReport(
+  storeId: string,
+  range: DateRange,
+): Promise<PnlReport> {
+  const [orders, adSpend] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        storeId,
+        processedAt: { gte: range.from, lte: range.to },
+      },
+      include: { lineItems: true },
+      orderBy: { processedAt: "asc" },
+    }),
+    prisma.adSpendEntry.findMany({
+      where: { storeId, date: { gte: range.from, lte: range.to } },
+    }),
+  ]);
+
+  const buckets = new Map<string, typeof EMPTY>();
+  const bucket = (key: string) => {
+    let found = buckets.get(key);
+    if (!found) {
+      found = { ...EMPTY };
+      buckets.set(key, found);
+    }
+    return found;
+  };
+
+  const totals = { ...EMPTY };
+  const feesByGateway = new Map<string, { orders: number; fees: number }>();
+
+  for (const order of orders) {
+    const day = bucket(dayKey(order.processedAt));
+
+    // The processor's real fee when we reconciled it, otherwise the configured estimate.
+    const processorFee = order.processorFeeActual ?? order.processorFeeEstimate;
+    const netRevenue = order.total - order.refundedTotal;
+
+    let cogs = 0;
+    let shippingCost = 0;
+    let handlingCost = 0;
+    let units = 0;
+    for (const item of order.lineItems) {
+      units += item.quantity;
+      cogs += item.unitCogs * item.quantity;
+      shippingCost += item.unitShipping * item.quantity;
+      handlingCost += item.unitHandling * item.quantity;
+    }
+
+    for (const target of [totals, day]) {
+      target.orders += 1;
+      target.units += units;
+      target.grossRevenue += order.subtotal;
+      target.discounts += order.discountTotal;
+      target.refunds += order.refundedTotal;
+      target.shippingCharged += order.shippingTotal;
+      target.taxes += order.taxTotal;
+      target.netRevenue += netRevenue;
+      target.cogs += cogs;
+      target.shippingCost += shippingCost;
+      target.handlingCost += handlingCost;
+      target.processorFees += processorFee;
+      target.shopifyFees += order.shopifyFee;
+    }
+
+    const gatewayEntry = feesByGateway.get(order.gateway) ?? { orders: 0, fees: 0 };
+    gatewayEntry.orders += 1;
+    gatewayEntry.fees += processorFee + order.shopifyFee;
+    feesByGateway.set(order.gateway, gatewayEntry);
+  }
+
+  const spendByPlatform = new Map<string, number>();
+  for (const entry of adSpend) {
+    totals.adSpend += entry.spend;
+    bucket(dayKey(entry.date)).adSpend += entry.spend;
+    spendByPlatform.set(
+      entry.platform,
+      (spendByPlatform.get(entry.platform) ?? 0) + entry.spend,
+    );
+  }
+
+  const daily: PnlDaily[] = [];
+  for (const date of eachDay(range)) {
+    const base = buckets.get(date) ?? { ...EMPTY };
+    daily.push({ date, ...finalize(base) });
+  }
+
+  return {
+    totals: finalize(totals),
+    daily,
+    adSpendByPlatform: [...spendByPlatform.entries()]
+      .map(([platform, spend]) => ({ platform, spend: round2(spend) }))
+      .sort((a, b) => b.spend - a.spend),
+    feesBreakdown: [...feesByGateway.entries()]
+      .map(([gateway, value]) => ({ gateway, orders: value.orders, fees: round2(value.fees) }))
+      .sort((a, b) => b.fees - a.fees),
+  };
+}
+
+function eachDay(range: DateRange): string[] {
+  const days: string[] = [];
+  const cursor = new Date(
+    Date.UTC(
+      range.from.getUTCFullYear(),
+      range.from.getUTCMonth(),
+      range.from.getUTCDate(),
+    ),
+  );
+  const end = dayKey(range.to);
+  // Guard against a reversed or absurd range producing an unbounded loop.
+  for (let i = 0; i < 800; i += 1) {
+    const key = dayKey(cursor);
+    days.push(key);
+    if (key >= end) break;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return days;
+}
+
+/// Per-product profitability over the range, driven by line-item COGS snapshots.
+export async function buildProductPnl(storeId: string, range: DateRange) {
+  const items = await prisma.orderLineItem.findMany({
+    where: { order: { storeId, processedAt: { gte: range.from, lte: range.to } } },
+    include: { variant: { include: { product: true } } },
+  });
+
+  const rows = new Map<
+    string,
+    {
+      key: string;
+      title: string;
+      sku: string | null;
+      units: number;
+      revenue: number;
+      cogs: number;
+      profit: number;
+      margin: number;
+      hasCost: boolean;
+    }
+  >();
+
+  for (const item of items) {
+    const key = item.variantId ?? `unlinked:${item.title}`;
+    const row =
+      rows.get(key) ??
+      {
+        key,
+        title: item.variant?.product.title
+          ? `${item.variant.product.title}${
+              item.variant.title && item.variant.title !== "Default Title"
+                ? ` — ${item.variant.title}`
+                : ""
+            }`
+          : item.title,
+        sku: item.sku,
+        units: 0,
+        revenue: 0,
+        cogs: 0,
+        profit: 0,
+        margin: 0,
+        hasCost: false,
+      };
+
+    const revenue = item.price * item.quantity - item.discountAllocated;
+    const cost =
+      (item.unitCogs + item.unitShipping + item.unitHandling) * item.quantity;
+
+    row.units += item.quantity;
+    row.revenue += revenue;
+    row.cogs += cost;
+    if (item.unitCogs > 0) row.hasCost = true;
+    rows.set(key, row);
+  }
+
+  return [...rows.values()]
+    .map((row) => {
+      const profit = row.revenue - row.cogs;
+      return {
+        ...row,
+        revenue: round2(row.revenue),
+        cogs: round2(row.cogs),
+        profit: round2(profit),
+        margin: row.revenue > 0 ? round2((profit / row.revenue) * 100) : 0,
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue);
+}

@@ -1,0 +1,78 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import {
+  reconcileProcessorFees,
+  syncMetaAds,
+  syncShopifyOrders,
+  syncShopifyProducts,
+  type SyncResult,
+} from "@/lib/sync";
+
+export const dynamic = "force-dynamic";
+
+const SOURCES = ["shopify-products", "shopify-orders", "meta", "fees"] as const;
+type Source = (typeof SOURCES)[number];
+
+function authorize(request: NextRequest): boolean {
+  const secret = process.env.SYNC_SECRET;
+  if (!secret) return true;
+  const header = request.headers.get("authorization");
+  const token = header?.replace(/^Bearer\s+/i, "") ?? request.nextUrl.searchParams.get("token");
+  return token === secret;
+}
+
+async function run(source: Source, storeId: string, days: number): Promise<SyncResult> {
+  switch (source) {
+    case "shopify-products":
+      return syncShopifyProducts(storeId);
+    case "shopify-orders":
+      return syncShopifyOrders(storeId, days);
+    case "meta":
+      return syncMetaAds(storeId, days);
+    case "fees":
+      return reconcileProcessorFees(storeId, days);
+  }
+}
+
+export async function POST(request: NextRequest) {
+  if (!authorize(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const params = request.nextUrl.searchParams;
+  const days = Number.parseInt(params.get("days") ?? "60", 10) || 60;
+  const requested = params.get("source");
+
+  const storeId = params.get("storeId") ?? (await prisma.store.findFirst())?.id;
+  if (!storeId) {
+    return NextResponse.json({ error: "No store configured" }, { status: 404 });
+  }
+
+  const sources: Source[] =
+    requested && SOURCES.includes(requested as Source)
+      ? [requested as Source]
+      : [...SOURCES];
+
+  const results: SyncResult[] = [];
+  const errors: { source: string; message: string }[] = [];
+
+  for (const source of sources) {
+    try {
+      results.push(await run(source, storeId, days));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push({ source, message });
+      await prisma.syncLog.create({
+        data: { storeId, source, status: "error", message, endedAt: new Date() },
+      });
+    }
+  }
+
+  return NextResponse.json(
+    { ok: errors.length === 0, results, errors },
+    { status: errors.length && !results.length ? 502 : 200 },
+  );
+}
+
+// Allows a scheduler that can only issue GETs (Vercel Cron, cron-job.org) to trigger a sync.
+export const GET = POST;
