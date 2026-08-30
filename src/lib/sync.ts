@@ -6,6 +6,7 @@ import {
   shopifyTransactionFee,
   toFeeRates,
 } from "@/lib/fees";
+import { buildTierTable, lookupLineCost, type TierTable } from "@/lib/cost-tiers";
 import * as shopify from "@/lib/integrations/shopify";
 import * as meta from "@/lib/integrations/meta-ads";
 import * as stripe from "@/lib/integrations/stripe";
@@ -40,6 +41,15 @@ function shopifyCredentials(store: StoreShopifyFields): shopify.ShopifyCredentia
     clientId: store.shopifyClientId,
     clientSecret: store.shopifyClientSecret,
   };
+}
+
+/** Empty when no price list is loaded, in which case costs stay per-unit. */
+export async function loadTierTable(storeId: string): Promise<TierTable> {
+  const rows = await prisma.supplierCostTier.findMany({
+    where: { storeId },
+    select: { sku: true, country: true, quantity: true, totalCost: true },
+  });
+  return buildTierTable(rows);
 }
 
 async function logSync(
@@ -125,6 +135,7 @@ export async function syncShopifyOrders(
   });
   const credentials = shopifyCredentials(store);
   const rates = toFeeRates(store.feeConfig);
+  const tierTable = await loadTierTable(storeId);
   const since = new Date(Date.now() - sinceDays * 86_400_000);
   const orders = await shopify.fetchOrders(credentials, since);
 
@@ -150,6 +161,7 @@ export async function syncShopifyOrders(
       currency: order.currencyCode,
       processedAt: new Date(order.processedAt),
       financialStatus: order.displayFinancialStatus,
+      shippingCountry: order.shippingCountry,
       subtotal: order.subtotal,
       discountTotal: order.discounts,
       shippingTotal: order.shipping,
@@ -188,6 +200,12 @@ export async function syncShopifyOrders(
           unitCogs: variant?.cogs ?? 0,
           unitShipping: variant?.shippingCost ?? 0,
           unitHandling: variant?.handlingCost ?? 0,
+          lineCost: lookupLineCost(
+            tierTable,
+            item.sku ?? variant?.sku ?? null,
+            order.shippingCountry,
+            item.quantity,
+          ),
         };
       }),
     });
@@ -330,6 +348,45 @@ function matchByAmount(
 }
 
 /// Re-applies current variant costs to line items, for orders already imported.
+/**
+ * Recomputes the supplier-tier cost on every stored line item. Runs after a price
+ * list is imported so existing orders pick up the new costs without re-syncing
+ * everything from Shopify.
+ *
+ * Line items sharing a (sku, country, quantity) all resolve to the same total, so
+ * they are updated as groups — a few dozen queries instead of one per line.
+ */
+export async function applyCostTiers(storeId: string): Promise<number> {
+  const table = await loadTierTable(storeId);
+  const items = await prisma.orderLineItem.findMany({
+    where: { order: { storeId } },
+    select: { id: true, sku: true, quantity: true, order: { select: { shippingCountry: true } } },
+  });
+
+  const groups = new Map<string, { cost: number | null; ids: string[] }>();
+  for (const item of items) {
+    const country = item.order.shippingCountry;
+    const key = `${item.sku ?? ""}|${country ?? ""}|${item.quantity}`;
+    const group = groups.get(key);
+    if (group) {
+      group.ids.push(item.id);
+      continue;
+    }
+    const cost = lookupLineCost(table, item.sku, country, item.quantity);
+    groups.set(key, { cost: cost === null ? null : round2(cost), ids: [item.id] });
+  }
+
+  let updated = 0;
+  for (const { cost, ids } of groups.values()) {
+    const result = await prisma.orderLineItem.updateMany({
+      where: { id: { in: ids } },
+      data: { lineCost: cost },
+    });
+    if (cost !== null) updated += result.count;
+  }
+  return updated;
+}
+
 export async function recalculateCosts(storeId: string): Promise<number> {
   const variants = await prisma.productVariant.findMany({
     where: { product: { storeId } },

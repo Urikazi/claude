@@ -135,9 +135,15 @@ export async function buildPnlReport(
     let units = 0;
     for (const item of order.lineItems) {
       units += item.quantity;
-      cogs += item.unitCogs * item.quantity;
-      shippingCost += item.unitShipping * item.quantity;
-      handlingCost += item.unitHandling * item.quantity;
+      if (item.lineCost !== null) {
+        // Supplier tier price: one all-in total for the line, already covering
+        // shipping, so it must not be scaled by quantity again.
+        cogs += item.lineCost;
+      } else {
+        cogs += item.unitCogs * item.quantity;
+        shippingCost += item.unitShipping * item.quantity;
+        handlingCost += item.unitHandling * item.quantity;
+      }
     }
 
     for (const target of [totals, day]) {
@@ -256,12 +262,13 @@ export async function buildProductPnl(storeId: string, range: DateRange) {
 
     const revenue = item.price * item.quantity - item.discountAllocated;
     const cost =
+      item.lineCost ??
       (item.unitCogs + item.unitShipping + item.unitHandling) * item.quantity;
 
     row.units += item.quantity;
     row.revenue += revenue;
     row.cogs += cost;
-    if (item.unitCogs > 0) row.hasCost = true;
+    if (cost > 0) row.hasCost = true;
     rows.set(key, row);
   }
 

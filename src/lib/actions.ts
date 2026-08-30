@@ -5,7 +5,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertSession } from "@/lib/session";
 import { DEFAULT_FEE_CONFIG } from "@/lib/fees";
+import { parsePriceList, priceListToRows } from "@/lib/price-list";
 import {
+  applyCostTiers,
   recalculateCosts,
   recalculateFees,
   reconcileProcessorFees,
@@ -243,8 +245,45 @@ export async function runSync(
 export async function resnapshotCosts(storeId: string): Promise<ActionState> {
   await assertSession();
   const updated = await recalculateCosts(storeId);
+  const tiered = await applyCostTiers(storeId);
   revalidatePath("/dashboard", "layout");
-  return { ok: true, message: `Re-applied costs to ${updated} line items.` };
+  return {
+    ok: true,
+    message: `Re-applied costs to ${updated} line items` +
+      (tiered ? `, ${tiered} priced from the supplier list.` : "."),
+  };
+}
+
+export async function importPriceList(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const storeId = formData.get("storeId")?.toString();
+  if (!storeId) return { ok: false, message: "Missing store." };
+
+  const parsed = parsePriceList(formData.get("priceList")?.toString() ?? "");
+  if (!parsed.ok) return { ok: false, message: parsed.message };
+
+  const rows = priceListToRows(parsed.list);
+
+  // Replace rather than merge: a new quote supersedes the old one, and leaving
+  // stale tiers behind would silently price some orders off last quarter's sheet.
+  await prisma.$transaction([
+    prisma.supplierCostTier.deleteMany({ where: { storeId } }),
+    prisma.supplierCostTier.createMany({
+      data: rows.map((row) => ({ storeId, ...row })),
+    }),
+  ]);
+
+  const priced = await applyCostTiers(storeId);
+  revalidatePath("/dashboard", "layout");
+
+  const skus = parsed.list.products.length;
+  return {
+    ok: true,
+    message: `Imported ${rows.length} prices across ${skus} products. Repriced ${priced} order lines.`,
+  };
 }
 
 const manualAdSpendSchema = z.object({

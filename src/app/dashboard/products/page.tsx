@@ -3,6 +3,7 @@ import { getActiveStore } from "@/lib/store";
 import { resolveRange } from "@/lib/format";
 import { Card, Empty, Th } from "@/components/ui";
 import { CogsRow, type VariantRow } from "@/components/cogs-row";
+import { PriceListForm, type TierSummary } from "@/components/price-list-form";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,32 @@ export default async function ProductsPage({
     sold.map((row) => [row.variantId!, row._sum.quantity ?? 0]),
   );
 
+  const tiers = await prisma.supplierCostTier.findMany({
+    where: { storeId: store.id },
+    orderBy: [{ sku: "asc" }, { country: "asc" }, { quantity: "asc" }],
+    select: { sku: true, country: true, quantity: true, totalCost: true },
+  });
+
+  const bySku = new Map<string, typeof tiers>();
+  for (const tier of tiers) {
+    bySku.set(tier.sku, [...(bySku.get(tier.sku) ?? []), tier]);
+  }
+  const tierSummary: TierSummary[] = [...bySku.entries()].map(([sku, rows]) => {
+    const countries = [...new Set(rows.map((r) => r.country))];
+    // Prefer a real destination over the catch-all when showing an example row.
+    const shown = countries.find((c) => c !== "*") ?? countries[0];
+    return {
+      sku,
+      countries: countries.length,
+      maxQuantity: Math.max(...rows.map((r) => r.quantity)),
+      sample: {
+        country: shown,
+        totals: rows.filter((r) => r.country === shown).map((r) => r.totalCost),
+      },
+    };
+  });
+  const pricedSkus = new Set(bySku.keys());
+
   const rows: VariantRow[] = products.flatMap((product) =>
     product.variants.map((variant) => ({
       id: variant.id,
@@ -49,17 +76,19 @@ export default async function ProductsPage({
       shippingCost: variant.shippingCost,
       handlingCost: variant.handlingCost,
       unitsSold: unitsByVariant.get(variant.id) ?? 0,
+      pricedFromList: variant.sku ? pricedSkus.has(variant.sku) : false,
     })),
   );
 
   // Best-sellers without a cost are the most expensive gap in the P&L, so surface them first.
+  const uncosted = (row: VariantRow) => row.cogs === 0 && !row.pricedFromList;
   rows.sort((a, b) => {
-    if (a.cogs === 0 && b.cogs !== 0) return -1;
-    if (b.cogs === 0 && a.cogs !== 0) return 1;
+    if (uncosted(a) && !uncosted(b)) return -1;
+    if (uncosted(b) && !uncosted(a)) return 1;
     return b.unitsSold - a.unitsSold;
   });
 
-  const missing = rows.filter((row) => row.cogs === 0).length;
+  const missing = rows.filter(uncosted).length;
 
   return (
     <div className="space-y-6">
@@ -70,6 +99,8 @@ export default async function ProductsPage({
           and future.
         </p>
       </div>
+
+      <PriceListForm storeId={store.id} summary={tierSummary} />
 
       <Card
         title={`${rows.length} variants · ${missing} without a cost`}

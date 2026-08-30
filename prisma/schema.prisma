@@ -7,6 +7,29 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Supplier price list. Fulfilment agents quote a total per (product, destination,
+/// quantity) rather than a unit cost, and the totals are not linear — two units of
+/// FL2600896 to the US cost 9.99, not 2 x 6.59, because one parcel ships once.
+/// Storing the quoted totals keeps COGS exact instead of approximating a unit price.
+model SupplierCostTier {
+  id      String @id @default(cuid())
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  sku     String
+  /// ISO country code, or "*" for a price that applies everywhere.
+  country String
+  /// Units in the order line.
+  quantity Int
+  /// Quoted total for that many units, all in.
+  totalCost Float
+
+  createdAt DateTime @default(now())
+
+  @@unique([storeId, sku, country, quantity])
+  @@index([storeId, sku])
+}
+
 /// Deployment-wide settings that must outlive a serverless instance but have no
 /// natural home on a store: the owner's password hash and the session signing key,
 /// both set on first run so deploying needs no shell access.
@@ -44,6 +67,7 @@ model Store {
   orders    Order[]
   adSpend   AdSpendEntry[]
   syncLogs  SyncLog[]
+  costTiers SupplierCostTier[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -125,6 +149,8 @@ model Order {
 
   processedAt DateTime
   financialStatus String? // paid, refunded, partially_refunded...
+  /// ISO country of the shipping address; selects the supplier's price column.
+  shippingCountry String?
 
   /// Gross merchandise value before discounts.
   subtotal      Float @default(0)
@@ -174,6 +200,9 @@ model OrderLineItem {
   unitCogs     Float @default(0)
   unitShipping Float @default(0)
   unitHandling Float @default(0)
+  /// Total cost for the whole line, taken from the supplier's quantity tier. Set only
+  /// when a tier matched; otherwise cost falls back to the per-unit fields above.
+  lineCost Float?
 
   @@index([orderId])
   @@index([variantId])

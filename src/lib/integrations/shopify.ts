@@ -1,9 +1,9 @@
 /**
- * Shopify Admin GraphQL client for custom apps.
+ * Shopify Admin GraphQL client.
  *
- * Install a custom app in the Shopify admin (Settings -> Apps and sales channels ->
- * Develop apps), grant `read_orders`, `read_products` and `read_all_orders`, then paste
- * the Admin API access token (`shpat_...`) into the dashboard settings page.
+ * Create an app in the Shopify Dev Dashboard with the `read_orders` and
+ * `read_products` scopes, install it on the store, and put its client ID and secret
+ * into the dashboard settings page. See `mintAccessToken` for how tokens are issued.
  */
 
 /**
@@ -163,6 +163,7 @@ export type ShopifyOrder = {
   name: string;
   processedAt: string;
   displayFinancialStatus: string | null;
+  shippingCountry: string | null;
   currencyCode: string;
   paymentGatewayNames: string[];
   subtotal: number;
@@ -194,6 +195,7 @@ const ORDERS_QUERY = `
         displayFinancialStatus
         currencyCode
         paymentGatewayNames
+        shippingAddress { countryCodeV2 }
         currentSubtotalPriceSet { shopMoney { amount } }
         totalDiscountsSet { shopMoney { amount } }
         totalShippingPriceSet { shopMoney { amount } }
@@ -241,6 +243,7 @@ export async function fetchOrders(
           name: string;
           processedAt: string;
           displayFinancialStatus: string | null;
+          shippingAddress: { countryCodeV2: string | null } | null;
           currencyCode: string;
           paymentGatewayNames: string[];
           currentSubtotalPriceSet: MoneySet;
@@ -271,6 +274,7 @@ export async function fetchOrders(
         name: node.name,
         processedAt: node.processedAt,
         displayFinancialStatus: node.displayFinancialStatus,
+        shippingCountry: node.shippingAddress?.countryCodeV2 ?? null,
         currencyCode: node.currencyCode,
         paymentGatewayNames: node.paymentGatewayNames ?? [],
         subtotal: money(node.currentSubtotalPriceSet),

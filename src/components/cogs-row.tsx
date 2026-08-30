@@ -18,6 +18,8 @@ export type VariantRow = {
   shippingCost: number;
   handlingCost: number;
   unitsSold: number;
+  /// Costed by the supplier price list, so the per-unit fields below are unused.
+  pricedFromList?: boolean;
 };
 
 export function CogsRow({ variant, currency }: { variant: VariantRow; currency: string }) {
@@ -62,6 +64,14 @@ export function CogsRow({ variant, currency }: { variant: VariantRow; currency: 
           {variant.variantTitle !== "Default Title" ? variant.variantTitle : ""}
           {variant.sku ? ` · ${variant.sku}` : ""}
         </span>
+        {variant.pricedFromList ? (
+          <span
+            className="ml-2 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted"
+            title="Cost comes from the supplier price list, which prices the whole line at once. The fields on this row are ignored."
+          >
+            priced from list
+          </span>
+        ) : null}
       </Td>
       <Td align="right">{formatMoney(variant.price, currency)}</Td>
       <Td align="right">{variant.unitsSold}</Td>
