@@ -76,6 +76,14 @@ async function mintAccessToken(
 
   if (!response.ok) {
     const detail = await response.text();
+    // The usual cause: the app exists in the Dev Dashboard but was never installed on
+    // this store. Client credentials only work against a store the app is installed on.
+    if (detail.includes("app_not_installed")) {
+      throw new ShopifyError(
+        `the app is not installed on ${domain}. Install it on the store from the Dev ` +
+          `Dashboard, then sync again.`,
+      );
+    }
     if (response.status === 401 || response.status === 400) {
       throw new ShopifyError(
         `could not mint an access token (${response.status}). Check the client ID and secret, ` +
