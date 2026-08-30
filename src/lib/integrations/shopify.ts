@@ -6,7 +6,11 @@
  * the Admin API access token (`shpat_...`) into the dashboard settings page.
  */
 
-export const SHOPIFY_API_VERSION = "2025-07";
+/**
+ * Shopify supports each API version for 12 months from release, so this needs a
+ * bump roughly once a year. Check the current version in the app's dev dashboard.
+ */
+export const SHOPIFY_API_VERSION = "2026-07";
 
 export type ShopifyCredentials = {
   domain: string;
