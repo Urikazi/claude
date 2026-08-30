@@ -127,6 +127,7 @@ export async function syncShopifyProducts(storeId: string): Promise<SyncResult> 
 export async function syncShopifyOrders(
   storeId: string,
   sinceDays = 60,
+  full = false,
 ): Promise<SyncResult> {
   const startedAt = new Date();
   const store = await prisma.store.findUniqueOrThrow({
@@ -137,7 +138,28 @@ export async function syncShopifyOrders(
   const rates = toFeeRates(store.feeConfig);
   const tierTable = await loadTierTable(storeId);
   const since = new Date(Date.now() - sinceDays * 86_400_000);
-  const orders = await shopify.fetchOrders(credentials, since);
+
+  /**
+   * After the first run, only orders Shopify has touched since the last successful
+   * sync are fetched. Re-importing every order in the window on every sync is what
+   * makes a daily refresh take as long as the initial import.
+   *
+   * The overlap covers orders edited slightly before the previous run started, and
+   * anything missed if that run half-finished.
+   */
+  const OVERLAP_MS = 2 * 86_400_000;
+  const lastSync = full
+    ? null
+    : await prisma.syncLog.findFirst({
+        where: { storeId, source: "shopify-orders", status: "success" },
+        orderBy: { startedAt: "desc" },
+        select: { startedAt: true },
+      });
+  const updatedSince = lastSync
+    ? new Date(Math.max(lastSync.startedAt.getTime() - OVERLAP_MS, since.getTime()))
+    : undefined;
+
+  const orders = await shopify.fetchOrders(credentials, since, updatedSince);
 
   // Cache the variant lookup so a large import does not issue a query per line item.
   const variants = await prisma.productVariant.findMany({
@@ -147,48 +169,61 @@ export async function syncShopifyOrders(
   const byShopifyId = new Map(variants.filter((v) => v.shopifyId).map((v) => [v.shopifyId!, v]));
   const bySku = new Map(variants.filter((v) => v.sku).map((v) => [v.sku!, v]));
 
+  /**
+   * Writes go out in chunks rather than per order. Three round trips per order was
+   * ~9,400 queries for a 3,000-order store, which overruns a serverless function's
+   * time limit; batching the same work into three queries per chunk brings it back
+   * to about a hundred round trips in total.
+   */
+  const CHUNK = 100;
   let count = 0;
-  for (const order of orders) {
-    const gateway = normalizeGateway(order.paymentGatewayNames[0]);
-    const netPaid = order.total - order.refunded;
-    const processorFeeEstimate = round2(estimateProcessorFee(gateway, netPaid, rates));
-    const shopifyFee = round2(shopifyTransactionFee(gateway, netPaid, rates));
 
-    const data = {
-      storeId,
-      shopifyId: order.id,
-      name: order.name,
-      currency: order.currencyCode,
-      processedAt: new Date(order.processedAt),
-      financialStatus: order.displayFinancialStatus,
-      shippingCountry: order.shippingCountry,
-      subtotal: order.subtotal,
-      discountTotal: order.discounts,
-      shippingTotal: order.shipping,
-      taxTotal: order.tax,
-      total: order.total,
-      refundedTotal: order.refunded,
-      gateway,
-      gatewayName: order.paymentGatewayNames.join(", ") || null,
-      processorFeeEstimate,
-      shopifyFee,
-    };
+  for (let start = 0; start < orders.length; start += CHUNK) {
+    const chunk = orders.slice(start, start + CHUNK);
 
-    const record = await prisma.order.upsert({
-      where: { storeId_shopifyId: { storeId, shopifyId: order.id } },
-      create: data,
-      update: data,
-    });
+    const records = await prisma.$transaction(
+      chunk.map((order) => {
+        const gateway = normalizeGateway(order.paymentGatewayNames[0]);
+        const netPaid = order.total - order.refunded;
+        const data = {
+          storeId,
+          shopifyId: order.id,
+          name: order.name,
+          currency: order.currencyCode,
+          processedAt: new Date(order.processedAt),
+          financialStatus: order.displayFinancialStatus,
+          shippingCountry: order.shippingCountry,
+          subtotal: order.subtotal,
+          discountTotal: order.discounts,
+          shippingTotal: order.shipping,
+          taxTotal: order.tax,
+          total: order.total,
+          refundedTotal: order.refunded,
+          gateway,
+          gatewayName: order.paymentGatewayNames.join(", ") || null,
+          processorFeeEstimate: round2(estimateProcessorFee(gateway, netPaid, rates)),
+          shopifyFee: round2(shopifyTransactionFee(gateway, netPaid, rates)),
+        };
+        return prisma.order.upsert({
+          where: { storeId_shopifyId: { storeId, shopifyId: order.id } },
+          create: data,
+          update: data,
+        });
+      }),
+    );
 
-    // Line items are fully replaced: quantities and refunds can change on an existing order.
-    await prisma.orderLineItem.deleteMany({ where: { orderId: record.id } });
-    await prisma.orderLineItem.createMany({
-      data: order.lineItems.map((item) => {
+    // Line items are replaced wholesale: quantities and refunds change on an order
+    // after the fact, so the previous rows cannot be trusted.
+    const orderIds = records.map((record) => record.id);
+    await prisma.orderLineItem.deleteMany({ where: { orderId: { in: orderIds } } });
+
+    const lineItems = chunk.flatMap((order, index) =>
+      order.lineItems.map((item) => {
         const variant =
           (item.variantId ? byShopifyId.get(item.variantId) : undefined) ??
           (item.sku ? bySku.get(item.sku) : undefined);
         return {
-          orderId: record.id,
+          orderId: records[index].id,
           variantId: variant?.id ?? null,
           shopifyId: item.id,
           title: item.title,
@@ -208,11 +243,15 @@ export async function syncShopifyOrders(
           ),
         };
       }),
-    });
-    count += 1;
+    );
+    if (lineItems.length) await prisma.orderLineItem.createMany({ data: lineItems });
+
+    count += chunk.length;
   }
 
-  const message = `Synced ${count} orders since ${since.toISOString().slice(0, 10)}.`;
+  const message = updatedSince
+    ? `Synced ${count} new or updated orders since ${updatedSince.toISOString().slice(0, 10)}.`
+    : `Synced ${count} orders since ${since.toISOString().slice(0, 10)}.`;
   await logSync(storeId, "shopify-orders", "success", message, count, startedAt);
   return { source: "shopify-orders", records: count, message };
 }

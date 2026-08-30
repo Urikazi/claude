@@ -11,6 +11,12 @@ import {
 } from "@/lib/sync";
 
 export const dynamic = "force-dynamic";
+/**
+ * A first import walks every order in the window, so it needs far longer than the
+ * default. Hosts cap this by plan — Vercel Hobby allows 60s and ignores anything
+ * higher, which is why the sync also works incrementally rather than relying on it.
+ */
+export const maxDuration = 300;
 
 const SOURCES = ["shopify-products", "shopify-orders", "meta", "fees"] as const;
 type Source = (typeof SOURCES)[number];

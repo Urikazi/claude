@@ -203,6 +203,7 @@ export async function runSync(
   storeId: string,
   source: "shopify-products" | "shopify-orders" | "meta" | "fees" | "all",
   days = 60,
+  full = false,
 ): Promise<ActionState> {
   await assertSession();
   const tasks: (() => Promise<{ message: string }>)[] = [];
@@ -210,7 +211,7 @@ export async function runSync(
     tasks.push(() => syncShopifyProducts(storeId));
   }
   if (source === "all" || source === "shopify-orders") {
-    tasks.push(() => syncShopifyOrders(storeId, days));
+    tasks.push(() => syncShopifyOrders(storeId, days, full));
   }
   if (source === "all" || source === "meta") tasks.push(() => syncMetaAds(storeId, days));
   if (source === "all" || source === "fees") {

@@ -253,13 +253,21 @@ function money(set: MoneySet): number {
   return set ? Number.parseFloat(set.shopMoney.amount) || 0 : 0;
 }
 
+/**
+ * `updatedSince` filters on when Shopify last touched the order rather than when it
+ * was placed, so an incremental sync still picks up refunds and edits made to older
+ * orders. `since` alone would miss them.
+ */
 export async function fetchOrders(
   credentials: ShopifyCredentials,
   since: Date,
+  updatedSince?: Date,
 ): Promise<ShopifyOrder[]> {
   const orders: ShopifyOrder[] = [];
   let cursor: string | null = null;
-  const filter = `processed_at:>=${since.toISOString()}`;
+  const filter = updatedSince
+    ? `updated_at:>=${updatedSince.toISOString()}`
+    : `processed_at:>=${since.toISOString()}`;
 
   // Shopify caps a single connection page at 250; 50 keeps us well inside the cost limit.
   for (let page = 0; page < 100; page += 1) {
