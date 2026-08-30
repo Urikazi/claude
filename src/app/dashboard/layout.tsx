@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { getActiveStore } from "@/lib/store";
+import { requireSession } from "@/lib/session";
+import { logout } from "@/lib/auth-actions";
 import { SyncButton } from "@/components/sync-button";
 import { NavLinks } from "@/components/nav-links";
 
@@ -10,6 +12,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  await requireSession();
   const store = await getActiveStore();
 
   return (
@@ -24,6 +27,11 @@ export default async function DashboardLayout({
         <div className="flex items-center gap-3">
           <NavLinks />
           <SyncButton storeId={store.id} />
+          <form action={logout}>
+            <button type="submit" className="text-xs text-muted hover:text-fg">
+              Sign out
+            </button>
+          </form>
         </div>
       </header>
       <main className="flex-1 px-6 py-6">{children}</main>

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { assertSession } from "@/lib/session";
 import { DEFAULT_FEE_CONFIG } from "@/lib/fees";
 import {
   recalculateCosts,
@@ -28,6 +29,7 @@ export async function updateVariantCosts(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  await assertSession();
   const parsed = costSchema.safeParse({
     variantId: formData.get("variantId"),
     cogs: formData.get("cogs"),
@@ -94,6 +96,7 @@ export async function updateStoreSettings(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  await assertSession();
   const parsed = credentialsSchema.safeParse({
     storeId: formData.get("storeId"),
     name: formData.get("name"),
@@ -144,6 +147,7 @@ export async function updateFeeConfig(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  await assertSession();
   const storeId = formData.get("storeId")?.toString();
   if (!storeId) return { ok: false, message: "Missing store." };
 
@@ -196,6 +200,7 @@ export async function runSync(
   source: "shopify-products" | "shopify-orders" | "meta" | "fees" | "all",
   days = 60,
 ): Promise<ActionState> {
+  await assertSession();
   const tasks: (() => Promise<{ message: string }>)[] = [];
   if (source === "all" || source === "shopify-products") {
     tasks.push(() => syncShopifyProducts(storeId));
@@ -227,6 +232,7 @@ export async function runSync(
 }
 
 export async function resnapshotCosts(storeId: string): Promise<ActionState> {
+  await assertSession();
   const updated = await recalculateCosts(storeId);
   revalidatePath("/dashboard", "layout");
   return { ok: true, message: `Re-applied costs to ${updated} line items.` };
@@ -244,6 +250,7 @@ export async function addManualAdSpend(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  await assertSession();
   const parsed = manualAdSpendSchema.safeParse({
     storeId: formData.get("storeId"),
     date: formData.get("date"),

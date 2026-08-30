@@ -28,29 +28,72 @@ that was not paid through Shopify Payments.
 
 ## Getting started
 
+Requires Node.js 20+ and a Postgres database (any provider — Neon, Supabase, Railway, or a
+local server).
+
 ```bash
 npm install
-cp .env.example .env
-npx prisma migrate dev     # create the database
-npm run db:seed            # optional: 90 days of demo data
+cp .env.example .env                       # then set DATABASE_URL
+npm run auth:hash -- 'your password here'  # prints the three auth secrets
+```
+
+Paste the three printed lines into `.env`, then:
+
+```bash
+npx prisma migrate deploy   # create the tables
+npm run db:seed             # optional: 90 days of demo data
 npm run dev
 ```
 
-Open http://localhost:3000 — you land on the dashboard.
+Open http://localhost:3000 and sign in with the password you chose.
 
 The demo seed gives you a fully populated dashboard so you can see the shape of the thing before
-connecting anything. Delete the "Demo Store" row (or your whole `prisma/dev.db`) once you connect
-real credentials.
+connecting anything. Delete the "Demo Store" row once you connect real credentials.
+
+## Deploying
+
+The dashboard holds live API credentials, so it requires a password before it will show anything.
+`DASHBOARD_PASSWORD_HASH` and `SESSION_SECRET` must both be set or every page stays locked — it
+fails closed rather than defaulting to open.
+
+1. Push this repo to GitHub and import it at [vercel.com/new](https://vercel.com/new).
+2. Add a Postgres database (Vercel's Neon integration sets `DATABASE_URL` for you), or paste a
+   connection string from any provider.
+3. Set the environment variables from `npm run auth:hash`: `DASHBOARD_PASSWORD_HASH`,
+   `SESSION_SECRET` and `SYNC_SECRET`.
+4. Deploy. The `vercel-build` script runs `prisma migrate deploy` before the build, so the
+   schema is created on first deploy.
+
+To sync automatically every morning, add `vercel.json`:
+
+```json
+{ "crons": [{ "path": "/api/sync?source=all", "schedule": "0 6 * * *" }] }
+```
+
+and have the cron send `Authorization: Bearer $SYNC_SECRET`. Without a valid secret or a signed-in
+browser session, `/api/sync` returns 401.
+
+Rotating `SESSION_SECRET` invalidates every existing session, which is how you sign out a lost
+device.
 
 ## Connecting your accounts
 
 Everything is configured per-store at **/dashboard/settings**. Credentials are stored in your own
 database and are never sent anywhere except the provider they belong to.
 
-**Shopify** — In your Shopify admin go to Settings → Apps and sales channels → Develop apps →
-Create an app. Grant the Admin API scopes `read_orders`, `read_all_orders` and `read_products`,
-install the app, then copy the Admin API access token (`shpat_…`) and your `*.myshopify.com`
-domain into the settings page.
+**Shopify** — Shopify has retired admin-created custom apps, so this uses the client credentials
+grant instead. In the [Dev Dashboard](https://dev.shopify.com), create an app with the
+`read_orders` and `read_products` scopes, release a version, and **install it on your store** —
+the grant only works against a store the app is installed on. Then open App settings →
+Credentials and copy the Client ID and a Secret into the settings page along with your
+`*.myshopify.com` domain. Access tokens are minted automatically and refreshed every 24 hours.
+
+Add `read_all_orders` only if you need order history older than 60 days; it requires separate
+approval from Shopify. Without it the API returns the last 60 days, which matches the default
+sync window.
+
+Legacy apps with a permanent `shpat_` token still work — paste it into the optional access token
+field and leave the client credentials blank.
 
 **Meta Ads** — Create a Meta app, add the Marketing API product, and generate a long-lived access
 token holding the `ads_read` permission. Your ad account ID is the `act_…` value shown in Ads

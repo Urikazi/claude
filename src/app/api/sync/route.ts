@@ -1,4 +1,6 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { hasValidSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import {
   reconcileProcessorFees,
@@ -13,12 +15,28 @@ export const dynamic = "force-dynamic";
 const SOURCES = ["shopify-products", "shopify-orders", "meta", "fees"] as const;
 type Source = (typeof SOURCES)[number];
 
-function authorize(request: NextRequest): boolean {
+/**
+ * Two callers: a cron service holding SYNC_SECRET, and a signed-in browser. An
+ * unset secret denies the cron path rather than opening the endpoint — this route
+ * triggers live API calls and rewrites order data, so it must fail closed.
+ */
+async function authorize(request: NextRequest): Promise<boolean> {
   const secret = process.env.SYNC_SECRET;
-  if (!secret) return true;
-  const header = request.headers.get("authorization");
-  const token = header?.replace(/^Bearer\s+/i, "") ?? request.nextUrl.searchParams.get("token");
-  return token === secret;
+  if (secret) {
+    const header = request.headers.get("authorization");
+    const token =
+      header?.replace(/^Bearer\s+/i, "") ?? request.nextUrl.searchParams.get("token");
+    if (token && timingSafeEquals(token, secret)) return true;
+  }
+  return hasValidSession();
+}
+
+/** Avoids leaking the secret's length or prefix through comparison timing. */
+function timingSafeEquals(a: string, b: string): boolean {
+  const left = Buffer.from(a, "utf8");
+  const right = Buffer.from(b, "utf8");
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
 }
 
 async function run(source: Source, storeId: string, days: number): Promise<SyncResult> {
@@ -35,7 +53,7 @@ async function run(source: Source, storeId: string, days: number): Promise<SyncR
 }
 
 export async function POST(request: NextRequest) {
-  if (!authorize(request)) {
+  if (!(await authorize(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
