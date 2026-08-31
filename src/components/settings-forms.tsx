@@ -98,10 +98,16 @@ export function ConnectionsForm({ store }: { store: StoreSettings }) {
         <h3 className="text-sm font-semibold">Shopify</h3>
         <p className="text-xs text-muted">
           In the Shopify Dev Dashboard, open your app → App settings → Credentials, and copy the
-          Client ID and a Secret. The app needs the <code>read_orders</code>,{" "}
-          <code>read_all_orders</code> and <code>read_products</code> scopes, and it must live in
-          the same organization as the store. Access tokens are minted automatically and refreshed
-          every 24 hours.
+          Client ID and a Secret. The app must live in the same organization as the store, and
+          access tokens are minted automatically and refreshed every 24 hours.
+        </p>
+        <p className="text-xs text-muted">
+          Scopes: <code>read_orders</code> and <code>read_products</code> for revenue,{" "}
+          <code>read_all_orders</code> for history older than 60 days,{" "}
+          <code>read_customers</code> to tell a first purchase from a repeat, and{" "}
+          <code>read_reports</code> for the sessions that conversion rate divides by. Adding a
+          scope is not enough on its own — release a new version <em>and</em> reinstall the app on
+          the store, or it keeps the permissions it was installed with.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Store domain">

@@ -86,8 +86,8 @@ database and are never sent anywhere except the provider they belong to.
 
 **Shopify** — Shopify has retired admin-created custom apps, so this uses the client credentials
 grant instead. In the [Dev Dashboard](https://dev.shopify.com), create an app with the
-`read_orders`, `read_products` and `read_reports` scopes, release a version, and **install it on
-your store** —
+`read_orders`, `read_products`, `read_customers` and `read_reports` scopes, release a version, and
+**install it on your store** —
 the grant only works against a store the app is installed on. Then open App settings →
 Credentials and copy the Client ID and a Secret into the settings page along with your
 `*.myshopify.com` domain. Access tokens are minted automatically and refreshed every 24 hours.

@@ -150,6 +150,24 @@ async function resolveAccessToken(credentials: ShopifyCredentials): Promise<stri
 }
 
 
+/**
+ * One line per distinct problem.
+ *
+ * A field refused on a connection is reported once per node, so a page of fifty orders
+ * comes back as the same sentence fifty times. Joining them verbatim produced an error
+ * message long enough to bury what it said.
+ */
+function summarizeGraphqlErrors(errors: { message: string }[]): string {
+  const counts = new Map<string, number>();
+  for (const error of errors) {
+    const message = error.message.trim();
+    counts.set(message, (counts.get(message) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([message, count]) => (count > 1 ? `${message} (x${count})` : message))
+    .join("; ");
+}
+
 async function graphql<T>(
   credentials: ShopifyCredentials,
   query: string,
@@ -180,7 +198,7 @@ async function graphql<T>(
   };
 
   if (payload.errors?.length) {
-    throw new ShopifyError(payload.errors.map((e) => e.message).join("; "));
+    throw new ShopifyError(summarizeGraphqlErrors(payload.errors));
   }
   if (!payload.data) throw new ShopifyError("empty response");
   return payload.data;
