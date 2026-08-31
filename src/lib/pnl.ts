@@ -160,7 +160,9 @@ export async function buildPnlReport(
     for (const target of [totals, day]) {
       target.orders += 1;
       target.units += units;
-      target.grossRevenue += order.subtotal;
+      // Shopify's gross sales: line items at full price, before any discount.
+      // The stored subtotal already has discounts taken off, so they go back on.
+      target.grossRevenue += order.subtotal + order.discountTotal;
       target.discounts += order.discountTotal;
       target.refunds += order.refundedTotal;
       target.shippingCharged += order.shippingTotal;

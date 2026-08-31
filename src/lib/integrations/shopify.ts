@@ -232,7 +232,11 @@ const ordersQuery = (withCustomer: boolean) => `
         paymentGatewayNames
         shippingAddress { countryCodeV2 }
         ${withCustomer ? "customer { id }" : ""}
-        currentSubtotalPriceSet { shopMoney { amount } }
+        # The original subtotal, not currentSubtotalPriceSet: the "current" fields are
+        # net of returns and edits while totalPriceSet is not, and mixing the two leaves
+        # a breakdown that cannot add up to its own total. Refunds are subtracted once,
+        # explicitly, from the order total instead.
+        subtotalPriceSet { shopMoney { amount } }
         totalDiscountsSet { shopMoney { amount } }
         totalShippingPriceSet { shopMoney { amount } }
         totalTaxSet { shopMoney { amount } }
@@ -284,7 +288,7 @@ type OrdersResponse = {
       customer: { id: string } | null;
       currencyCode: string;
       paymentGatewayNames: string[];
-      currentSubtotalPriceSet: MoneySet;
+      subtotalPriceSet: MoneySet;
       totalDiscountsSet: MoneySet;
       totalShippingPriceSet: MoneySet;
       totalTaxSet: MoneySet;
@@ -352,7 +356,7 @@ export async function fetchOrders(
         customerId: node.customer?.id ?? null,
         currencyCode: node.currencyCode,
         paymentGatewayNames: node.paymentGatewayNames ?? [],
-        subtotal: money(node.currentSubtotalPriceSet),
+        subtotal: money(node.subtotalPriceSet),
         discounts: money(node.totalDiscountsSet),
         shipping: money(node.totalShippingPriceSet),
         tax: money(node.totalTaxSet),

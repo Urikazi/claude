@@ -15,11 +15,16 @@ reports what actually landed in your pocket.
 | COGS by quantity | Entered per variant, or imported as a supplier price list |
 | Sessions and conversion rate | Shopify analytics via ShopifyQL (`read_reports`) |
 
+Revenue is reported as **Total sales**, computed the way Shopify computes it — gross sales less
+discounts and returns, plus shipping and tax — and broken out on the overview so it can be
+reconciled against Shopify line by line. Anything the named rows do not cover, such as duties or
+tips, appears as its own row rather than being folded silently into another.
+
 The profit calculation:
 
 ```
-net revenue      = order total − refunds
-gross profit     = net revenue − COGS − processing fees − Shopify fees
+total sales      = order total − refunds
+gross profit     = total sales − COGS − processing fees − Shopify fees
 net profit       = gross profit − ad spend
 ```
 

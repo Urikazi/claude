@@ -10,6 +10,7 @@ import { getActiveStore } from "@/lib/store";
 import { formatMoney, formatNumber, formatPercent, resolveRange } from "@/lib/format";
 import { Card, Delta, Empty, Stat, Td, Th } from "@/components/ui";
 import { CostBreakdown } from "@/components/cost-breakdown";
+import { SalesBreakdown } from "@/components/sales-breakdown";
 import { PnlChart } from "@/components/pnl-chart";
 import { RangePicker } from "@/components/range-picker";
 
@@ -51,7 +52,7 @@ export default async function OverviewPage({
   const change = (current: number, was: number) => percentChange(current, was);
 
   const waterfall: { label: string; value: number; kind: "in" | "out" | "result" }[] = [
-    { label: "Net revenue", value: totals.netRevenue, kind: "in" },
+    { label: "Total sales", value: totals.netRevenue, kind: "in" },
     { label: "Cost of goods", value: -totals.cogs, kind: "out" },
     { label: "Shipping & handling", value: -(totals.shippingCost + totals.handlingCost), kind: "out" },
     { label: "Payment processing fees", value: -totals.processorFees, kind: "out" },
@@ -125,10 +126,10 @@ export default async function OverviewPage({
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Stat
-          label="Net revenue"
+          label="Total sales"
           value={formatMoney(totals.netRevenue, currency)}
           change={change(totals.netRevenue, prior.netRevenue)}
-          hint={`AOV ${formatMoney(totals.aov, currency)}`}
+          hint={`AOV ${formatMoney(totals.aov, currency)} · same basis as Shopify`}
         />
         <Stat
           label="Ad spend"
@@ -183,6 +184,10 @@ export default async function OverviewPage({
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Total sales">
+          <SalesBreakdown totals={totals} currency={currency} />
+        </Card>
+
         <Card title="Cost breakdown">
           <CostBreakdown slices={costSlices} currency={currency} />
         </Card>
