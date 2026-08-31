@@ -14,10 +14,10 @@ export const dynamic = "force-dynamic";
 export default async function AdsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }) {
-  const { range: rangeParam } = await searchParams;
-  const range = resolveRange(rangeParam);
+  const { range: rangeParam, from, to } = await searchParams;
+  const range = resolveRange(rangeParam, from, to);
   const store = await getActiveStore();
   const currency = store.currency;
 

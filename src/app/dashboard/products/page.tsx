@@ -11,10 +11,10 @@ export const dynamic = "force-dynamic";
 export default async function ProductsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; q?: string }>;
+  searchParams: Promise<{ range?: string; from?: string; to?: string; q?: string }>;
 }) {
-  const { range: rangeParam, q } = await searchParams;
-  const range = resolveRange(rangeParam);
+  const { range: rangeParam, from, to, q } = await searchParams;
+  const range = resolveRange(rangeParam, from, to);
   const store = await getActiveStore();
   const search = q?.trim();
 

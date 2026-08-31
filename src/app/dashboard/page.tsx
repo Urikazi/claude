@@ -12,10 +12,10 @@ export const dynamic = "force-dynamic";
 export default async function OverviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }) {
-  const { range: rangeParam } = await searchParams;
-  const range = resolveRange(rangeParam);
+  const { range: rangeParam, from, to } = await searchParams;
+  const range = resolveRange(rangeParam, from, to);
   const store = await getActiveStore();
   const currency = store.currency;
 
@@ -62,7 +62,7 @@ export default async function OverviewPage({
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Stat
           label="Net revenue"
           value={formatMoney(totals.netRevenue, currency)}
@@ -74,9 +74,22 @@ export default async function OverviewPage({
           hint={`ROAS ${totals.roas.toFixed(2)}x · CPA ${formatMoney(totals.cpa, currency)}`}
         />
         <Stat
-          label="Total costs & fees"
-          value={formatMoney(totalCosts + totalFees, currency)}
-          hint={`COGS ${formatMoney(totalCosts, currency)} · fees ${formatMoney(totalFees, currency)}`}
+          label="COGS"
+          value={formatMoney(totalCosts, currency)}
+          hint={
+            totals.netRevenue > 0
+              ? `${formatPercent((totalCosts / totals.netRevenue) * 100)} of revenue`
+              : "Goods, shipping and handling"
+          }
+        />
+        <Stat
+          label="Fees"
+          value={formatMoney(totalFees, currency)}
+          hint={
+            totals.netRevenue > 0
+              ? `${formatPercent((totalFees / totals.netRevenue) * 100)} of revenue`
+              : "Processor and Shopify fees"
+          }
         />
         <Stat
           label="Net profit"

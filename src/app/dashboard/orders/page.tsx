@@ -11,10 +11,10 @@ const PAGE_SIZE = 100;
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }) {
-  const { range: rangeParam } = await searchParams;
-  const range = resolveRange(rangeParam);
+  const { range: rangeParam, from, to } = await searchParams;
+  const range = resolveRange(rangeParam, from, to);
   const store = await getActiveStore();
 
   const orders = await prisma.order.findMany({
