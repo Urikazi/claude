@@ -160,7 +160,7 @@ export async function syncShopifyOrders(
     ? new Date(Math.max(lastSync.startedAt.getTime() - OVERLAP_MS, since.getTime()))
     : undefined;
 
-  const { orders, customerFieldAvailable } = await shopify.fetchOrders(
+  const { orders, customerFieldAvailable, customerFieldRefusal } = await shopify.fetchOrders(
     credentials,
     since,
     updatedSince,
@@ -267,7 +267,9 @@ export async function syncShopifyOrders(
   // which looks identical to a store that simply has none.
   const message = customerFieldAvailable
     ? base
-    : `${base} Shopify would not return which customer placed each order, so new and returning cannot be separated — your app needs protected customer data access approved.`;
+    : `${base} Shopify would not say which customer placed each order, so new and returning cannot be separated — the app needs protected customer data access approved.${
+        customerFieldRefusal ? ` Shopify said: ${customerFieldRefusal}` : ""
+      }`;
   await logSync(storeId, "shopify-orders", "success", message, count, startedAt);
   return { source: "shopify-orders", records: count, message };
 }
@@ -526,8 +528,19 @@ export async function syncShopifySessions(
     rows = await shopify.fetchDailySessions(credentials, since, until);
   } catch (error) {
     if (error instanceof shopify.SessionsUnavailableError) {
-      await logSync(storeId, "shopify-sessions", "error", error.message, 0, startedAt);
-      throw new NotConfiguredError(error.message);
+      // Names the scopes the installed app really holds. A refusal plus "but I granted
+      // it" almost always means the credentials in settings still point at the old app.
+      const granted = await shopify
+        .fetchGrantedScopes(credentials)
+        .catch(() => null);
+      const detail = granted
+        ? granted.includes("read_reports")
+          ? ` The connected app does hold read_reports, so the refusal is about protected customer data access, which analytics also requires. Scopes: ${granted.join(", ")}.`
+          : ` The connected app does not hold read_reports — its scopes are: ${granted.join(", ")}. If you granted it on a new app, put that app's Client ID and Secret into settings, since these credentials still reach the old one.`
+        : "";
+      const message = `${error.message}${detail}`;
+      await logSync(storeId, "shopify-sessions", "error", message, 0, startedAt);
+      throw new NotConfiguredError(message);
     }
     throw error;
   }

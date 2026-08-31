@@ -322,6 +322,8 @@ export type OrdersPage = {
    * the absence of ids, which cannot tell "not approved" from "no orders yet".
    */
   customerFieldAvailable: boolean;
+  /** What Shopify said when it refused, so the cause is not reduced to a guess. */
+  customerFieldRefusal?: string;
 };
 
 export async function fetchOrders(
@@ -332,6 +334,7 @@ export async function fetchOrders(
   const orders: ShopifyOrder[] = [];
   let cursor: string | null = null;
   let withCustomer = true;
+  let customerRefusal: string | undefined;
   const filter = updatedSince
     ? `updated_at:>=${updatedSince.toISOString()}`
     : `processed_at:>=${since.toISOString()}`;
@@ -347,6 +350,7 @@ export async function fetchOrders(
       // failed request rather than one per page.
       if (withCustomer && isProtectedDataError(error)) {
         withCustomer = false;
+        customerRefusal = error instanceof Error ? error.message : String(error);
         return graphql<OrdersResponse>(credentials, ordersQuery(false), {
           cursor,
           query: filter,
@@ -388,7 +392,7 @@ export async function fetchOrders(
     cursor = data.orders.pageInfo.endCursor;
   }
 
-  return { orders, customerFieldAvailable: withCustomer };
+  return { orders, customerFieldAvailable: withCustomer, customerFieldRefusal: customerRefusal };
 }
 
 export type ShopifyProduct = {
@@ -602,6 +606,28 @@ export function readSessionRows(
   return out;
 }
 
+/**
+ * The scopes the installed app actually holds.
+ *
+ * A new app with the right boxes ticked still changes nothing until its credentials
+ * replace the old ones in settings and it is installed on the store. Asking Shopify
+ * what it granted turns "I gave it access" and "it says no access" into one checkable
+ * fact rather than two conflicting beliefs.
+ */
+export async function fetchGrantedScopes(
+  credentials: ShopifyCredentials,
+): Promise<string[]> {
+  const data = await graphql<{
+    currentAppInstallation: { accessScopes: { handle: string }[] } | null;
+  }>(
+    credentials,
+    `query GrantedScopes {
+      currentAppInstallation { accessScopes { handle } }
+    }`,
+  );
+  return (data.currentAppInstallation?.accessScopes ?? []).map((scope) => scope.handle);
+}
+
 export async function fetchDailySessions(
   credentials: ShopifyCredentials,
   since: Date,
@@ -621,8 +647,11 @@ export async function fetchDailySessions(
       break;
     } catch (error) {
       if (error instanceof ShopifyError && isReportsAccessError(error)) {
+        // Shopify's own words are kept: "missing read_reports" and "needs protected
+        // customer data" both surface as a refusal here, and paraphrasing them into one
+        // sentence hides which of the two it is.
         throw new SessionsUnavailableError(
-          "Shopify did not allow reading analytics. Add the read_reports scope to your app, release a new version and reinstall it, then sync sessions again.",
+          `Shopify refused the analytics query. Add the read_reports scope, and Level 2 protected customer data access, to the app whose credentials are in settings — then release a new version, reinstall it, and sync again. Shopify said: ${error.message}`,
         );
       }
       if (isShapeError(error)) {
