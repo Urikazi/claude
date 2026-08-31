@@ -24,6 +24,8 @@ export type VariantRow = {
   inheritedTierSku?: string;
   /** Set when an imported list prices this SKU per destination, which wins here. */
   countryPricedSku?: string;
+  /** Whether any cost covers this variant, including one inherited from a family SKU. */
+  costed: boolean;
 };
 
 type BundleDraft = { key: string; quantity: string; totalCost: string };

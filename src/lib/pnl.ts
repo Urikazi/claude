@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { DEFAULT_TIME_ZONE, addDays, zonedDayKey } from "@/lib/timezone";
 import { round2 } from "@/lib/fees";
+import { isVariantCosted } from "@/lib/cost-tiers";
 
 /** `timeZone` decides which calendar day an order falls on; UTC when unset. */
 export type DateRange = { from: Date; to: Date; timeZone?: string };
@@ -310,4 +311,27 @@ export function previousRange(range: DateRange): DateRange {
 export function percentChange(current: number, previous: number): number | null {
   if (previous === 0) return current === 0 ? 0 : null;
   return ((current - previous) / Math.abs(previous)) * 100;
+}
+
+/**
+ * Variants that no cost can be found for, which is what the overview warns about.
+ *
+ * Counting `ProductVariant.cogs = 0` in SQL would be cheaper but wrong: the cost
+ * editor and imported price lists both write tiers, leaving that column at zero on
+ * variants that are fully costed.
+ */
+export async function countUncostedVariants(storeId: string): Promise<number> {
+  const [variants, priced] = await Promise.all([
+    prisma.productVariant.findMany({
+      where: { product: { storeId } },
+      select: { sku: true, cogs: true },
+    }),
+    prisma.supplierCostTier.findMany({
+      where: { storeId },
+      select: { sku: true },
+      distinct: ["sku"],
+    }),
+  ]);
+  const pricedSkus = new Set(priced.map((tier) => tier.sku));
+  return variants.filter((variant) => !isVariantCosted(pricedSkus, variant)).length;
 }

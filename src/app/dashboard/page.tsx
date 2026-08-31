@@ -1,6 +1,11 @@
 import Link from "next/link";
-import { prisma } from "@/lib/db";
-import { buildPnlReport, buildProductPnl, percentChange, previousRange } from "@/lib/pnl";
+import {
+  buildPnlReport,
+  buildProductPnl,
+  countUncostedVariants,
+  percentChange,
+  previousRange,
+} from "@/lib/pnl";
 import { getActiveStore } from "@/lib/store";
 import { formatMoney, formatNumber, formatPercent, resolveRange } from "@/lib/format";
 import { Card, Delta, Empty, Stat, Td, Th } from "@/components/ui";
@@ -24,9 +29,7 @@ export default async function OverviewPage({
     buildPnlReport(store.id, range),
     buildPnlReport(store.id, previousRange(range)),
     buildProductPnl(store.id, range),
-    prisma.productVariant.count({
-      where: { product: { storeId: store.id }, cogs: 0 },
-    }),
+    countUncostedVariants(store.id),
   ]);
 
   const { totals } = report;
@@ -100,11 +103,14 @@ export default async function OverviewPage({
               </span>
             </p>
           </div>
-          <dl className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-4">
+          <dl className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
             {[
               { label: "Orders", value: formatNumber(totals.orders), c: change(totals.orders, prior.orders), up: true },
               { label: "Units sold", value: formatNumber(totals.units), c: change(totals.units, prior.units), up: true },
               { label: "Margin", value: formatPercent(totals.margin), c: change(totals.margin, prior.margin), up: true },
+              // ROAS earns revenue back, POAS earns profit back; the pair together says
+              // whether a campaign that looks fine on revenue actually pays for itself.
+              { label: "ROAS", value: `${totals.roas.toFixed(2)}x`, c: change(totals.roas, prior.roas), up: true },
               { label: "POAS", value: `${totals.poas.toFixed(2)}x`, c: change(totals.poas, prior.poas), up: true },
             ].map((item) => (
               <div key={item.label}>

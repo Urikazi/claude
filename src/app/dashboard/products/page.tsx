@@ -4,7 +4,7 @@ import { resolveRange } from "@/lib/format";
 import { Card, Empty, Th } from "@/components/ui";
 import { CogsRow, type VariantRow } from "@/components/cogs-row";
 import { PriceListForm, type TierSummary } from "@/components/price-list-form";
-import { resolveTierSku } from "@/lib/cost-tiers";
+import { isVariantCosted, resolveTierSku } from "@/lib/cost-tiers";
 
 export const dynamic = "force-dynamic";
 
@@ -99,12 +99,15 @@ export default async function ProductsPage({
           .map(({ quantity, totalCost }) => ({ quantity, totalCost })),
         inheritedTierSku: costedAs && costedAs !== variant.sku ? costedAs : undefined,
         countryPricedSku: costedAs && countryPricedSkus.has(costedAs) ? costedAs : undefined,
+        costed: isVariantCosted(pricedSkus, variant),
       };
     }),
   );
 
   // Best-sellers without a cost are the most expensive gap in the P&L, so surface them first.
-  const uncosted = (row: VariantRow) => row.costPerUnit === 0 && row.bundles.length === 0;
+  // A SKU an imported list prices per destination has no "*" tier to show in the editor
+  // yet still costs its orders, so ask the resolver rather than reading the visible fields.
+  const uncosted = (row: VariantRow) => !row.costed;
 
   rows.sort((a, b) => {
     if (uncosted(a) && !uncosted(b)) return -1;

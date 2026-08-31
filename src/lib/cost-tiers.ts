@@ -172,3 +172,17 @@ export function costOrderLines(
   }
   return costs;
 }
+
+/**
+ * Whether a variant can be costed at all.
+ *
+ * Costs live in the tier table, so a variant is covered when its own SKU is priced,
+ * when a shorter family SKU is, or when the legacy per-unit field is still filled in.
+ * Testing `ProductVariant.cogs` alone reports every tier-costed variant as missing.
+ */
+export function isVariantCosted(
+  pricedSkus: Set<string>,
+  variant: { sku: string | null; cogs: number },
+): boolean {
+  return variant.cogs > 0 || resolveTierSku(pricedSkus, variant.sku) !== null;
+}
