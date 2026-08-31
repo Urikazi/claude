@@ -4,6 +4,7 @@ import { resolveRange } from "@/lib/format";
 import { Card, Empty, Th } from "@/components/ui";
 import { CogsRow, type VariantRow } from "@/components/cogs-row";
 import { PriceListForm, type TierSummary } from "@/components/price-list-form";
+import { resolveTierSku } from "@/lib/cost-tiers";
 
 export const dynamic = "force-dynamic";
 
@@ -86,13 +87,19 @@ export default async function ProductsPage({
       shippingCost: variant.shippingCost,
       handlingCost: variant.handlingCost,
       unitsSold: unitsByVariant.get(variant.id) ?? 0,
-      pricedFromList: variant.sku ? pricedSkus.has(variant.sku) : false,
+      // A shade variant (FL2600896-M) is covered by the family price (FL2600896).
+      pricedFromList: resolveTierSku(pricedSkus, variant.sku) !== null,
       tiers: variant.sku ? tiersBySku.get(variant.sku) : undefined,
+      inheritedTierSku:
+        resolveTierSku(pricedSkus, variant.sku) !== variant.sku
+          ? (resolveTierSku(pricedSkus, variant.sku) ?? undefined)
+          : undefined,
     })),
   );
 
   // Best-sellers without a cost are the most expensive gap in the P&L, so surface them first.
   const uncosted = (row: VariantRow) => row.cogs === 0 && !row.pricedFromList;
+
   rows.sort((a, b) => {
     if (uncosted(a) && !uncosted(b)) return -1;
     if (uncosted(b) && !uncosted(a)) return 1;

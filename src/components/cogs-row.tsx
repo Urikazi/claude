@@ -27,6 +27,8 @@ export type VariantRow = {
   pricedFromList?: boolean;
   /// Existing quantity prices for this SKU, keyed by quantity.
   tiers?: Record<number, number>;
+  /// Set when the cost comes from a shorter, shared SKU rather than this exact one.
+  inheritedTierSku?: string;
 };
 
 export function CogsRow({
@@ -58,6 +60,7 @@ export function CogsRow({
   });
 
   const tierCount = Object.keys(variant.tiers ?? {}).length;
+  const quantityPriced = tierCount > 0 || Boolean(variant.inheritedTierSku);
   const totalCost = draft.cogs + draft.shippingCost + draft.handlingCost;
   const unitMargin = variant.price - totalCost;
   const marginPercent = variant.price > 0 ? (unitMargin / variant.price) * 100 : 0;
@@ -74,7 +77,7 @@ export function CogsRow({
         setDraft((current) => ({ ...current, [name]: Number(event.target.value) || 0 }))
       }
       className={cellInput}
-      disabled={tierCount > 0}
+      disabled={quantityPriced}
       aria-label={`${label} for ${variant.productTitle}`}
     />
   );
@@ -88,12 +91,16 @@ export function CogsRow({
             {variant.variantTitle !== "Default Title" ? variant.variantTitle : ""}
             {variant.sku ? ` · ${variant.sku}` : ""}
           </span>
-          {variant.pricedFromList || tierCount > 0 ? (
+          {quantityPriced ? (
             <span
               className="ml-2 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted"
-              title="Cost comes from quantity pricing, which prices the whole line at once. The per-unit fields on this row are unused."
+              title={
+                variant.inheritedTierSku
+                  ? `Priced by quantity under ${variant.inheritedTierSku}, which covers every shade of this product.`
+                  : "Cost comes from quantity pricing, which prices the whole line at once. The per-unit fields on this row are unused."
+              }
             >
-              quantity priced
+              {variant.inheritedTierSku ? `priced as ${variant.inheritedTierSku}` : "quantity priced"}
             </span>
           ) : null}
         </Td>
@@ -103,7 +110,7 @@ export function CogsRow({
         <Td align="right">{numberField("shippingCost", "Shipping cost")}</Td>
         <Td align="right">{numberField("handlingCost", "Handling cost")}</Td>
         <Td align="right">
-          {tierCount > 0 ? (
+          {quantityPriced ? (
             <span className="text-[11px] text-muted">by quantity</span>
           ) : (
             <>
@@ -130,8 +137,8 @@ export function CogsRow({
             <button
               type="submit"
               form={formId}
-              disabled={pending || tierCount > 0}
-              title={tierCount > 0 ? "Quantity pricing is in use for this SKU" : undefined}
+              disabled={pending || quantityPriced}
+              title={quantityPriced ? "Quantity pricing is in use for this SKU" : undefined}
               className="rounded-md border border-line bg-panel-2 px-2.5 py-1.5 text-xs transition hover:border-accent disabled:opacity-50"
             >
               {pending ? "…" : state?.ok ? "Saved" : "Save"}

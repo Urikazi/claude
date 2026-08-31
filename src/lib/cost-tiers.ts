@@ -35,17 +35,35 @@ export function buildTierTable(
 }
 
 /**
+ * Shopify SKUs carry a variant suffix the supplier's does not: a price list quoting
+ * FL2600896 has to cover FL2600896-M, -L and -D, because the shade does not change
+ * what the supplier charges. Longest first, so an exact entry always wins over the
+ * family price.
+ */
+export function skuCandidates(sku: string): string[] {
+  const parts = sku.split("-");
+  const candidates = [sku];
+  while (parts.length > 1) {
+    parts.pop();
+    candidates.push(parts.join("-"));
+  }
+  return candidates;
+}
+
+/**
  * A country-specific price beats the catch-all: the add-ons are quoted once for
  * everywhere, while the main product is quoted per destination.
  */
 function tiersFor(table: TierTable, sku: string, country: string | null): Tier[] | null {
-  const byCountry = table.get(sku);
-  if (!byCountry) return null;
-  return (
-    (country ? byCountry.get(country.toUpperCase()) : undefined) ??
-    byCountry.get(ANY_COUNTRY) ??
-    null
-  );
+  for (const candidate of skuCandidates(sku)) {
+    const byCountry = table.get(candidate);
+    if (!byCountry) continue;
+    const tiers =
+      (country ? byCountry.get(country.toUpperCase()) : undefined) ??
+      byCountry.get(ANY_COUNTRY);
+    if (tiers?.length) return tiers;
+  }
+  return null;
 }
 
 /**
@@ -85,4 +103,10 @@ export function lookupLineCost(
     ? (last.totalCost - previous.totalCost) / (last.quantity - previous.quantity)
     : last.totalCost / last.quantity;
   return last.totalCost + marginal * (quantity - last.quantity);
+}
+
+/** Which priced SKU a variant resolves to, if any. Mirrors the lookup's matching. */
+export function resolveTierSku(pricedSkus: Set<string>, sku: string | null): string | null {
+  if (!sku) return null;
+  return skuCandidates(sku).find((candidate) => pricedSkus.has(candidate)) ?? null;
 }
