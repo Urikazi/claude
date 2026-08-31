@@ -315,11 +315,20 @@ type OrdersResponse = {
  * was placed, so an incremental sync still picks up refunds and edits made to older
  * orders. `since` alone would miss them.
  */
+export type OrdersPage = {
+  orders: ShopifyOrder[];
+  /**
+   * False when Shopify refused the customer field. Reported rather than inferred from
+   * the absence of ids, which cannot tell "not approved" from "no orders yet".
+   */
+  customerFieldAvailable: boolean;
+};
+
 export async function fetchOrders(
   credentials: ShopifyCredentials,
   since: Date,
   updatedSince?: Date,
-): Promise<ShopifyOrder[]> {
+): Promise<OrdersPage> {
   const orders: ShopifyOrder[] = [];
   let cursor: string | null = null;
   let withCustomer = true;
@@ -379,7 +388,7 @@ export async function fetchOrders(
     cursor = data.orders.pageInfo.endCursor;
   }
 
-  return orders;
+  return { orders, customerFieldAvailable: withCustomer };
 }
 
 export type ShopifyProduct = {

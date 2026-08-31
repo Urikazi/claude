@@ -75,11 +75,18 @@ export default async function ConversionPage({
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {/* With no customer on the orders, a first purchase cannot be told from a repeat.
+            Showing 0% new and everything as returning would be stating the opposite of
+            what is known, so both are withheld until the data supports them. */}
         <Stat
           label="New customer CVR"
-          value={pct(totals.newCvr)}
-          hint={`${formatNumber(totals.newOrders)} first orders`}
-          tone="positive"
+          value={report.customersKnown ? pct(totals.newCvr) : "—"}
+          hint={
+            report.customersKnown
+              ? `${formatNumber(totals.newOrders)} first orders`
+              : "Needs customer data"
+          }
+          tone={report.customersKnown ? "positive" : "neutral"}
         />
         <Stat
           label="Blended CVR"
@@ -88,8 +95,12 @@ export default async function ConversionPage({
         />
         <Stat
           label="Returning CVR"
-          value={pct(totals.returningCvr)}
-          hint={`${formatNumber(totals.returningOrders)} repeat orders`}
+          value={report.customersKnown ? pct(totals.returningCvr) : "—"}
+          hint={
+            report.customersKnown
+              ? `${formatNumber(totals.returningOrders)} repeat orders`
+              : "Needs customer data"
+          }
         />
         <Stat
           label={report.source === "sessions" ? "Sessions" : "Ad clicks"}
@@ -97,6 +108,17 @@ export default async function ConversionPage({
           hint={report.source === "sessions" ? "From Shopify analytics" : "From Meta, as a stand-in"}
         />
       </div>
+
+      {report.source === "sessions" ? (
+        <p className="text-xs text-muted">
+          Shopify&rsquo;s own conversion rate counts <em>sessions that converted</em>, and only
+          from the online store. This counts <em>orders</em> against the same sessions, so it
+          reads a little higher: an order placed without a session — a subscription renewal,
+          a draft order, anything not from the storefront — has no session to be counted in.
+          Both move together; compare each against itself over time rather than against the
+          other.
+        </p>
+      ) : null}
 
       <Card title="Revenue by customer type">
         <p className="mb-4 text-sm text-muted">
@@ -111,20 +133,30 @@ export default async function ConversionPage({
           />
           <Stat
             label="From new customers"
-            value={formatMoney(totals.newRevenue, store.currency)}
+            value={
+              report.customersKnown ? formatMoney(totals.newRevenue, store.currency) : "—"
+            }
             hint={
-              totals.revenue > 0
-                ? `${((totals.newRevenue / totals.revenue) * 100).toFixed(1)}% of revenue`
-                : undefined
+              report.customersKnown
+                ? totals.revenue > 0
+                  ? `${((totals.newRevenue / totals.revenue) * 100).toFixed(1)}% of revenue`
+                  : undefined
+                : "Needs customer data"
             }
           />
           <Stat
             label="From returning customers"
-            value={formatMoney(totals.returningRevenue, store.currency)}
+            value={
+              report.customersKnown
+                ? formatMoney(totals.returningRevenue, store.currency)
+                : "—"
+            }
             hint={
-              totals.revenue > 0
-                ? `${((totals.returningRevenue / totals.revenue) * 100).toFixed(1)}% of revenue`
-                : undefined
+              report.customersKnown
+                ? totals.revenue > 0
+                  ? `${((totals.returningRevenue / totals.revenue) * 100).toFixed(1)}% of revenue`
+                  : undefined
+                : "Needs customer data"
             }
           />
         </div>
@@ -132,7 +164,12 @@ export default async function ConversionPage({
 
       <Card title="Conversion by day">
         {totals.visits > 0 ? (
-          <ConversionChart data={report.daily} markers={markers} denominator={denominator} />
+          <ConversionChart
+            data={report.daily}
+            markers={markers}
+            denominator={denominator}
+            customersKnown={report.customersKnown}
+          />
         ) : (
           <Empty>
             No {denominator} in this range yet. Sync sessions, or widen the date range.

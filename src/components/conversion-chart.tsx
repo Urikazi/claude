@@ -18,10 +18,14 @@ export function ConversionChart({
   data,
   markers,
   denominator,
+  customersKnown,
 }: {
   data: ConversionDay[];
   markers: ChangeMarker[];
   denominator: string;
+  /** Without it the new-customer series is not drawn: it would be a flat zero, which
+      reads as "no new customers converted" rather than "not measured". */
+  customersKnown: boolean;
 }) {
   // A day with no traffic yet is a gap, not a zero. Today's sessions arrive on the next
   // sync, and plotting the empty day as 0% draws a cliff to the floor that reads as a
@@ -92,23 +96,25 @@ export function ConversionChart({
               />
             ))}
 
-          <Line
-            type="monotone"
-            dataKey="newCvr"
-            name="New customer CVR"
-            stroke="#3987e5"
-            strokeWidth={2}
-            dot={false}
-          />
-          {/* Blended sits behind as context: it includes repeat buyers, who convert for
-              reasons a landing page edit does not touch. */}
+          {customersKnown ? (
+            <Line
+              type="monotone"
+              dataKey="newCvr"
+              name="New customer CVR"
+              stroke="#3987e5"
+              strokeWidth={2}
+              dot={false}
+            />
+          ) : null}
+          {/* Blended sits behind as context when new customers are known, and carries the
+              chart on its own when they are not. */}
           <Line
             type="monotone"
             dataKey="cvr"
             name="Blended CVR"
-            stroke="#8d97ad"
-            strokeWidth={1.5}
-            strokeDasharray="4 3"
+            stroke={customersKnown ? "#8d97ad" : "#3987e5"}
+            strokeWidth={customersKnown ? 1.5 : 2}
+            strokeDasharray={customersKnown ? "4 3" : undefined}
             dot={false}
           />
         </LineChart>

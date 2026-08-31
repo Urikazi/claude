@@ -160,7 +160,11 @@ export async function syncShopifyOrders(
     ? new Date(Math.max(lastSync.startedAt.getTime() - OVERLAP_MS, since.getTime()))
     : undefined;
 
-  const orders = await shopify.fetchOrders(credentials, since, updatedSince);
+  const { orders, customerFieldAvailable } = await shopify.fetchOrders(
+    credentials,
+    since,
+    updatedSince,
+  );
 
   // Cache the variant lookup so a large import does not issue a query per line item.
   const variants = await prisma.productVariant.findMany({
@@ -256,9 +260,14 @@ export async function syncShopifyOrders(
     count += chunk.length;
   }
 
-  const message = updatedSince
+  const base = updatedSince
     ? `Synced ${count} new or updated orders since ${updatedSince.toISOString().slice(0, 10)}.`
     : `Synced ${count} orders since ${since.toISOString().slice(0, 10)}.`;
+  // Said outright rather than left to be guessed from orders that carry no customer,
+  // which looks identical to a store that simply has none.
+  const message = customerFieldAvailable
+    ? base
+    : `${base} Shopify would not return which customer placed each order, so new and returning cannot be separated — your app needs protected customer data access approved.`;
   await logSync(storeId, "shopify-orders", "success", message, count, startedAt);
   return { source: "shopify-orders", records: count, message };
 }
