@@ -401,3 +401,48 @@ export async function importAdSpendPaste(
       (skipped.length ? ` Skipped ${skipped.length} unreadable line(s): ${skipped.slice(0, 5).join(", ")}.` : ""),
   };
 }
+
+/**
+ * Manual entries exist because the API was not connected yet. Once a platform syncs
+ * the same day, both rows are counted and the day's spend doubles — silently, and in
+ * the direction that understates profit.
+ *
+ * Only days the platform itself has now reported are cleared, and only for that
+ * platform, so hand-entered spend for channels with no integration is untouched.
+ */
+export async function removeSupersededManualSpend(
+  storeId: string,
+  platform = "meta",
+): Promise<ActionState> {
+  await assertSession();
+
+  const synced = await prisma.adSpendEntry.findMany({
+    where: { storeId, platform, NOT: { campaignId: { startsWith: "manual:" } } },
+    select: { date: true },
+    distinct: ["date"],
+  });
+  if (synced.length === 0) {
+    return {
+      ok: false,
+      message: `No synced ${platform} data yet, so nothing has been superseded. Run a sync first.`,
+    };
+  }
+
+  const { count } = await prisma.adSpendEntry.deleteMany({
+    where: {
+      storeId,
+      platform,
+      campaignId: { startsWith: "manual:" },
+      date: { in: synced.map((row) => row.date) },
+    },
+  });
+
+  revalidatePath("/dashboard/ads");
+  revalidatePath("/dashboard");
+  return {
+    ok: true,
+    message: count
+      ? `Removed ${count} manual entr${count === 1 ? "y" : "ies"} on days now covered by ${platform}.`
+      : "Nothing to remove — no manual entries overlap the synced days.",
+  };
+}

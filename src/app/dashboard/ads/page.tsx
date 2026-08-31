@@ -7,6 +7,7 @@ import { Card, Empty, Stat, Td, Th } from "@/components/ui";
 import { RangePicker } from "@/components/range-picker";
 import { ManualAdSpendForm } from "@/components/manual-ad-spend-form";
 import { AdSpendPasteForm } from "@/components/ad-spend-paste-form";
+import { DedupeSpendButton } from "@/components/dedupe-spend-button";
 
 export const dynamic = "force-dynamic";
 
@@ -104,6 +105,9 @@ export default async function AdsPage({
 
       <Card title="Paste spend from Ads Manager">
         <AdSpendPasteForm storeId={store.id} />
+        <div className="mt-4 border-t border-line pt-4">
+          <DedupeSpendButton storeId={store.id} />
+        </div>
       </Card>
 
       <Card title="Add a single day">
