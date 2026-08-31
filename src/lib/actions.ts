@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { assertSession } from "@/lib/session";
 import { DEFAULT_FEE_CONFIG } from "@/lib/fees";
 import { parseSpendPaste } from "@/lib/ad-spend-paste";
+import { DEFAULT_TIME_ZONE, isValidTimeZone } from "@/lib/timezone";
 import { parsePriceList, priceListToRows } from "@/lib/price-list";
 // Bundled at build time rather than read from disk, so it survives deployment to a
 // host that only ships the compiled output.
@@ -68,6 +69,7 @@ const credentialsSchema = z.object({
   storeId: z.string().min(1),
   name: z.string().min(1),
   currency: z.string().min(1).max(3),
+  timezone: z.string().min(1),
   shopifyDomain: z.string().optional(),
   shopifyClientId: z.string().optional(),
   shopifyClientSecret: z.string().optional(),
@@ -109,6 +111,7 @@ export async function updateStoreSettings(
     storeId: formData.get("storeId"),
     name: formData.get("name"),
     currency: formData.get("currency"),
+    timezone: formData.get("timezone") ?? "UTC",
     shopifyDomain: formData.get("shopifyDomain")?.toString(),
     shopifyClientId: formData.get("shopifyClientId")?.toString(),
     shopifyClientSecret: formData.get("shopifyClientSecret")?.toString(),
@@ -132,6 +135,9 @@ export async function updateStoreSettings(
     data: {
       name: data.name,
       currency: data.currency.toUpperCase(),
+      // Rejected rather than stored blindly: an unknown zone would silently move
+      // every day boundary back to UTC.
+      timezone: isValidTimeZone(data.timezone) ? data.timezone : DEFAULT_TIME_ZONE,
       shopifyDomain: keepIfBlank(data.shopifyDomain),
       shopifyClientId: keepIfBlank(data.shopifyClientId),
       shopifyClientSecret: keepIfBlank(data.shopifyClientSecret),

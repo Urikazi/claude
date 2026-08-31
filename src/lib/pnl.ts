@@ -1,7 +1,9 @@
 import { prisma } from "@/lib/db";
+import { DEFAULT_TIME_ZONE, addDays, zonedDayKey } from "@/lib/timezone";
 import { round2 } from "@/lib/fees";
 
-export type DateRange = { from: Date; to: Date };
+/** `timeZone` decides which calendar day an order falls on; UTC when unset. */
+export type DateRange = { from: Date; to: Date; timeZone?: string };
 
 export type PnlTotals = {
   orders: number;
@@ -55,7 +57,15 @@ const EMPTY: Omit<PnlTotals, "margin" | "roas" | "poas" | "aov" | "cpa"> = {
   netProfit: 0,
 };
 
-function dayKey(date: Date): string {
+function dayKey(date: Date, timeZone?: string): string {
+  return zonedDayKey(date, timeZone ?? DEFAULT_TIME_ZONE);
+}
+
+/**
+ * Ad spend is stored against a calendar date the platform reported, not an instant,
+ * so it is read back as that date rather than converted between zones.
+ */
+function adSpendDayKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
@@ -123,7 +133,7 @@ export async function buildPnlReport(
   const feesByGateway = new Map<string, { orders: number; fees: number }>();
 
   for (const order of orders) {
-    const day = bucket(dayKey(order.processedAt));
+    const day = bucket(dayKey(order.processedAt, range.timeZone));
 
     // The processor's real fee when we reconciled it, otherwise the configured estimate.
     const processorFee = order.processorFeeActual ?? order.processorFeeEstimate;
@@ -171,7 +181,7 @@ export async function buildPnlReport(
   const spendByPlatform = new Map<string, number>();
   for (const entry of adSpend) {
     totals.adSpend += entry.spend;
-    bucket(dayKey(entry.date)).adSpend += entry.spend;
+    bucket(adSpendDayKey(entry.date)).adSpend += entry.spend;
     spendByPlatform.set(
       entry.platform,
       (spendByPlatform.get(entry.platform) ?? 0) + entry.spend,
@@ -197,21 +207,16 @@ export async function buildPnlReport(
 }
 
 function eachDay(range: DateRange): string[] {
+  // Walked as calendar keys rather than by adding 24 hours, which would skip or
+  // repeat a day across a daylight-saving change.
   const days: string[] = [];
-  const cursor = new Date(
-    Date.UTC(
-      range.from.getUTCFullYear(),
-      range.from.getUTCMonth(),
-      range.from.getUTCDate(),
-    ),
-  );
-  const end = dayKey(range.to);
+  const end = dayKey(range.to, range.timeZone);
+  let key = dayKey(range.from, range.timeZone);
   // Guard against a reversed or absurd range producing an unbounded loop.
   for (let i = 0; i < 800; i += 1) {
-    const key = dayKey(cursor);
     days.push(key);
     if (key >= end) break;
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    key = addDays(key, 1);
   }
   return days;
 }

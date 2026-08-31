@@ -14,8 +14,8 @@ export default async function OrdersPage({
   searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }) {
   const { range: rangeParam, from, to } = await searchParams;
-  const range = resolveRange(rangeParam, from, to);
   const store = await getActiveStore();
+  const range = resolveRange(rangeParam, from, to, store.timezone);
 
   const orders = await prisma.order.findMany({
     where: { storeId: store.id, processedAt: { gte: range.from, lte: range.to } },

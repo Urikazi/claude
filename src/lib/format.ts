@@ -1,3 +1,13 @@
+import {
+  DEFAULT_TIME_ZONE,
+  addDays,
+  daysBetween,
+  endOfZonedDay,
+  safeTimeZone,
+  startOfZonedDay,
+  todayInZone,
+} from "@/lib/timezone";
+
 export function formatMoney(value: number, currency = "USD"): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -24,57 +34,48 @@ export function formatDate(value: Date | string): string {
 }
 
 /// Resolves the `?range=` query param into an inclusive UTC day range.
-export type Range = { from: Date; to: Date; days: number; label: string };
+export type Range = {
+  from: Date;
+  to: Date;
+  days: number;
+  label: string;
+  /** The store's zone, carried through so day buckets match the range boundaries. */
+  timeZone: string;
+};
 
-/** Whole UTC days, so a range never straddles part of one. */
-function startOfDay(date: Date): Date {
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0),
-  );
-}
-
-function endOfDay(date: Date): Date {
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999),
-  );
-}
-
-const DAY_MS = 86_400_000;
-
-function parseDay(value: string | undefined): Date | null {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function formatDay(date: Date): string {
-  return date.toISOString().slice(0, 10);
+function parseDay(value: string | undefined): string | null {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
 }
 
 /**
- * `range` is a preset name; `from`/`to` are ISO days that override it. A custom range
- * with only one end still resolves, anchored to today, so a half-filled date picker
- * shows something rather than falling back and looking broken.
+ * `range` is a preset name; `from`/`to` are ISO days that override it. Boundaries are
+ * the store's own midnights, so a day here is the same day Shopify reports.
+ *
+ * A custom range with only one end still resolves, anchored to today, so a
+ * half-filled date picker shows something rather than looking broken.
  */
-export function resolveRange(range?: string, from?: string, to?: string): Range {
+export function resolveRange(
+  range?: string,
+  from?: string,
+  to?: string,
+  timeZone: string = DEFAULT_TIME_ZONE,
+): Range {
+  const zone = safeTimeZone(timeZone);
+  const today = todayInZone(zone);
   const customFrom = parseDay(from);
   const customTo = parseDay(to);
 
   if (customFrom || customTo) {
-    const today = new Date();
-    let start = startOfDay(customFrom ?? customTo ?? today);
-    let end = endOfDay(customTo ?? customFrom ?? today);
+    let startKey = customFrom ?? customTo ?? today;
+    let endKey = customTo ?? customFrom ?? today;
     // Reversed inputs are a slip, not an empty range.
-    if (start > end) [start, end] = [startOfDay(end), endOfDay(start)];
-    const days = Math.round((endOfDay(end).getTime() - start.getTime()) / DAY_MS);
+    if (startKey > endKey) [startKey, endKey] = [endKey, startKey];
     return {
-      from: start,
-      to: end,
-      days: Math.max(days, 1),
-      label:
-        formatDay(start) === formatDay(end)
-          ? formatDay(start)
-          : `${formatDay(start)} to ${formatDay(end)}`,
+      from: startOfZonedDay(startKey, zone),
+      to: endOfZonedDay(endKey, zone),
+      days: daysBetween(startKey, endKey),
+      label: startKey === endKey ? startKey : `${startKey} to ${endKey}`,
+      timeZone: zone,
     };
   }
 
@@ -87,9 +88,14 @@ export function resolveRange(range?: string, from?: string, to?: string): Range 
   };
   const preset = presets[range ?? "30d"] ?? presets["30d"];
 
-  const end = endOfDay(new Date());
-  if (preset.endsYesterday) end.setUTCDate(end.getUTCDate() - 1);
-  const start = startOfDay(new Date(end.getTime() - (preset.days - 1) * DAY_MS));
+  const endKey = preset.endsYesterday ? addDays(today, -1) : today;
+  const startKey = addDays(endKey, -(preset.days - 1));
 
-  return { from: start, to: end, days: preset.days, label: preset.label };
+  return {
+    from: startOfZonedDay(startKey, zone),
+    to: endOfZonedDay(endKey, zone),
+    days: preset.days,
+    label: preset.label,
+    timeZone: zone,
+  };
 }

@@ -43,6 +43,9 @@ model Store {
   id       String @id @default(cuid())
   name     String
   currency String @default("USD")
+  /// IANA zone the store reports in, matching its Shopify setting. Day boundaries
+  /// follow it, so a dashboard day is the same day Shopify shows.
+  timezone String @default("UTC")
 
   // Shopify. Dev Dashboard apps authenticate with a client ID + secret and mint
   // 24-hour tokens via the client credentials grant. Legacy admin-created custom

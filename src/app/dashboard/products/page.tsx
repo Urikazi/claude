@@ -14,8 +14,8 @@ export default async function ProductsPage({
   searchParams: Promise<{ range?: string; from?: string; to?: string; q?: string }>;
 }) {
   const { range: rangeParam, from, to, q } = await searchParams;
-  const range = resolveRange(rangeParam, from, to);
   const store = await getActiveStore();
+  const range = resolveRange(rangeParam, from, to, store.timezone);
   const search = q?.trim();
 
   const products = await prisma.product.findMany({

@@ -10,6 +10,26 @@ import {
 } from "@/lib/actions";
 import { Card, Field, buttonClass, ghostButtonClass, inputClass } from "@/components/ui";
 
+/**
+ * Named zones rather than fixed offsets, so a store that observes daylight saving
+ * does not drift by an hour for half the year.
+ */
+const TIME_ZONES = [
+  { value: "UTC", label: "UTC" },
+  { value: "Europe/London", label: "GMT/BST — London, Lisbon" },
+  { value: "Europe/Paris", label: "GMT+1 — Paris, Madrid, Berlin, Rome" },
+  { value: "Europe/Athens", label: "GMT+2 — Athens, Helsinki" },
+  { value: "Etc/GMT-1", label: "GMT+1 fixed (no daylight saving)" },
+  { value: "America/New_York", label: "US Eastern" },
+  { value: "America/Chicago", label: "US Central" },
+  { value: "America/Denver", label: "US Mountain" },
+  { value: "America/Los_Angeles", label: "US Pacific" },
+  { value: "America/Sao_Paulo", label: "Brazil — Sao Paulo" },
+  { value: "Asia/Dubai", label: "GMT+4 — Dubai" },
+  { value: "Asia/Singapore", label: "GMT+8 — Singapore" },
+  { value: "Australia/Sydney", label: "Australia — Sydney" },
+];
+
 function Status({ state }: { state: ActionState }) {
   if (!state) return null;
   return (
@@ -21,6 +41,7 @@ export type StoreSettings = {
   id: string;
   name: string;
   currency: string;
+  timezone: string;
   shopifyDomain: string | null;
   shopifyClientId: string | null;
   metaAdAccountId: string | null;
@@ -58,6 +79,18 @@ export function ConnectionsForm({ store }: { store: StoreSettings }) {
             required
             className={inputClass}
           />
+        </Field>
+        <Field
+          label="Time zone"
+          hint="Match your Shopify time zone, so a day here is the same day there."
+        >
+          <select name="timezone" defaultValue={store.timezone} className={inputClass}>
+            {TIME_ZONES.map((zone) => (
+              <option key={zone.value} value={zone.value}>
+                {zone.label}
+              </option>
+            ))}
+          </select>
         </Field>
       </div>
 
