@@ -491,20 +491,107 @@ export async function verifyCredentials(credentials: ShopifyCredentials) {
  */
 export class SessionsUnavailableError extends Error {}
 
-const SESSIONS_QUERY = `
-  query Sessions($query: String!) {
+/**
+ * `shopifyqlQuery`'s response shape has changed across API versions: the union member
+ * `TableResponse` no longer exists, and `parseErrors` went from a list of objects to a
+ * scalar. Rather than pin one shape and break on the next revision, the candidates are
+ * tried in turn and the first the API accepts is used.
+ *
+ * Ordered newest first, so a current store pays for one request.
+ */
+const SESSIONS_QUERIES = [
+  // 2026-07: flat selection, scalar parse errors.
+  `query Sessions($query: String!) {
     shopifyqlQuery(query: $query) {
-      __typename
+      tableData { columns { name } rowData }
+      parseErrors
+    }
+  }`,
+  // Same, but rows rather than rowData.
+  `query Sessions($query: String!) {
+    shopifyqlQuery(query: $query) {
+      tableData { columns { name } rows }
+      parseErrors
+    }
+  }`,
+  // Pre-2026: union member plus structured parse errors.
+  `query Sessions($query: String!) {
+    shopifyqlQuery(query: $query) {
       ... on TableResponse {
-        tableData {
-          columns { name dataType displayName }
-          rowData
-        }
+        tableData { columns { name } rowData }
       }
       parseErrors { code message }
     }
+  }`,
+];
+
+type ShopifyqlColumn = { name: string };
+type ShopifyqlTable = {
+  columns: ShopifyqlColumn[];
+  rowData?: unknown[][] | null;
+  rows?: Record<string, unknown>[] | null;
+};
+type ShopifyqlResult = {
+  shopifyqlQuery: {
+    tableData?: ShopifyqlTable | null;
+    parseErrors?: unknown;
+  } | null;
+};
+
+/** A shape mismatch, as opposed to the query itself being wrong or refused. */
+function isShapeError(error: unknown): boolean {
+  if (!(error instanceof ShopifyError)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("no such type") ||
+    message.includes("doesn't exist on type") ||
+    message.includes("selections can't be made") ||
+    message.includes("cannot query field") ||
+    message.includes("didn't exist on type")
+  );
+}
+
+/** Parse errors arrive as a string, a list of strings, or a list of objects. */
+export function describeParseErrors(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const parts = (Array.isArray(value) ? value : [value])
+    .map((entry) => {
+      if (typeof entry === "string") return entry.trim();
+      if (entry && typeof entry === "object") {
+        const record = entry as Record<string, unknown>;
+        return String(record.message ?? record.code ?? "").trim();
+      }
+      return "";
+    })
+    .filter(Boolean);
+  return parts.length ? parts.join("; ") : null;
+}
+
+/** Pulls day/sessions pairs out of either row representation. */
+export function readSessionRows(
+  table: ShopifyqlTable | null | undefined,
+): { day: string; sessions: number }[] {
+  if (!table) return [];
+  const names = (table.columns ?? []).map((column) => column.name);
+  const dayIndex = names.indexOf("day");
+  const sessionsIndex = names.indexOf("sessions");
+
+  const raw: (Record<string, unknown> | unknown[])[] =
+    table.rows ?? (table.rowData as unknown[][] | undefined) ?? [];
+
+  const out: { day: string; sessions: number }[] = [];
+  for (const row of raw) {
+    const dayValue = Array.isArray(row) ? row[dayIndex] : row?.day;
+    const sessionValue = Array.isArray(row) ? row[sessionsIndex] : row?.sessions;
+    // ShopifyQL dates come back as "2026-08-30" or a full timestamp; keep the day.
+    const day = String(dayValue ?? "").slice(0, 10);
+    const sessions = Number.parseInt(String(sessionValue ?? ""), 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(sessions)) {
+      out.push({ day, sessions });
+    }
   }
-`;
+  return out;
+}
 
 export async function fetchDailySessions(
   credentials: ShopifyCredentials,
@@ -516,53 +603,46 @@ export async function fetchDailySessions(
   // Dates are pinned rather than relative so the window matches the sync's own range.
   const ql = `FROM sessions SHOW sessions TIMESERIES day SINCE ${from} UNTIL ${to} ORDER BY day ASC`;
 
-  let data: {
-    shopifyqlQuery: {
-      __typename: string;
-      tableData?: {
-        columns: { name: string; dataType: string; displayName: string }[];
-        rowData: string[][];
-      } | null;
-      parseErrors?: { code: string; message: string }[] | null;
-    } | null;
-  };
-  try {
-    data = await graphql(credentials, SESSIONS_QUERY, { query: ql });
-  } catch (error) {
-    if (error instanceof ShopifyError && isReportsAccessError(error)) {
-      throw new SessionsUnavailableError(
-        "Shopify did not allow reading analytics. Add the read_reports scope to your app, release a new version and reinstall it, then sync sessions again.",
-      );
+  let data: ShopifyqlResult | null = null;
+  let lastShapeError: unknown = null;
+
+  for (const query of SESSIONS_QUERIES) {
+    try {
+      data = await graphql<ShopifyqlResult>(credentials, query, { query: ql });
+      break;
+    } catch (error) {
+      if (error instanceof ShopifyError && isReportsAccessError(error)) {
+        throw new SessionsUnavailableError(
+          "Shopify did not allow reading analytics. Add the read_reports scope to your app, release a new version and reinstall it, then sync sessions again.",
+        );
+      }
+      if (isShapeError(error)) {
+        lastShapeError = error;
+        continue;
+      }
+      throw error;
     }
-    throw error;
+  }
+
+  if (!data) {
+    throw new ShopifyError(
+      `analytics query shape not recognised by this API version: ${
+        lastShapeError instanceof Error ? lastShapeError.message : "unknown"
+      }`,
+    );
   }
 
   const result = data.shopifyqlQuery;
   if (!result) throw new SessionsUnavailableError("Shopify returned no analytics data.");
-  if (result.parseErrors?.length) {
-    throw new ShopifyError(
-      `analytics query rejected: ${result.parseErrors.map((e) => e.message).join("; ")}`,
-    );
-  }
-  const table = result.tableData;
-  if (!table) return [];
 
-  // Columns are addressed by name rather than position, which ShopifyQL does not promise.
-  const dayIndex = table.columns.findIndex((column) => column.name === "day");
-  const sessionsIndex = table.columns.findIndex((column) => column.name === "sessions");
-  if (dayIndex < 0 || sessionsIndex < 0) {
-    throw new ShopifyError(
-      `analytics response missing day/sessions columns (got ${table.columns.map((c) => c.name).join(", ")})`,
-    );
-  }
+  const parseErrors = describeParseErrors(result.parseErrors);
+  if (parseErrors) throw new ShopifyError(`analytics query rejected: ${parseErrors}`);
 
-  const rows: { day: string; sessions: number }[] = [];
-  for (const row of table.rowData ?? []) {
-    // ShopifyQL dates come back as "2026-08-30" or a full timestamp; keep the day.
-    const day = String(row[dayIndex] ?? "").slice(0, 10);
-    const sessions = Number.parseInt(String(row[sessionsIndex] ?? "0"), 10);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(sessions)) {
-      rows.push({ day, sessions });
+  const rows = readSessionRows(result.tableData);
+  if (!rows.length && result.tableData) {
+    const names = (result.tableData.columns ?? []).map((column) => column.name).join(", ");
+    if (names && !names.includes("sessions")) {
+      throw new ShopifyError(`analytics response missing a sessions column (got ${names})`);
     }
   }
   return rows;
