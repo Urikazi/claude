@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getActiveStore } from "@/lib/store";
-import { formatNumber, resolveRange } from "@/lib/format";
+import { formatMoney, formatNumber, resolveRange } from "@/lib/format";
 import { todayInZone } from "@/lib/timezone";
 import { analyzeChanges, buildConversionReport, type ChangeImpact } from "@/lib/conversion";
 import { CHANGE_CATEGORIES } from "@/lib/change-categories";
@@ -97,6 +97,38 @@ export default async function ConversionPage({
           hint={report.source === "sessions" ? "From Shopify analytics" : "From Meta, as a stand-in"}
         />
       </div>
+
+      <Card title="Revenue by customer type">
+        <p className="mb-4 text-sm text-muted">
+          Every order counts towards revenue, repeat buyers included. This splits the same
+          total the P&amp;L reports — it does not filter anything out of it.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Stat
+            label="Total revenue"
+            value={formatMoney(totals.revenue, store.currency)}
+            hint={`${formatNumber(totals.orders)} orders, net of refunds`}
+          />
+          <Stat
+            label="From new customers"
+            value={formatMoney(totals.newRevenue, store.currency)}
+            hint={
+              totals.revenue > 0
+                ? `${((totals.newRevenue / totals.revenue) * 100).toFixed(1)}% of revenue`
+                : undefined
+            }
+          />
+          <Stat
+            label="From returning customers"
+            value={formatMoney(totals.returningRevenue, store.currency)}
+            hint={
+              totals.revenue > 0
+                ? `${((totals.returningRevenue / totals.revenue) * 100).toFixed(1)}% of revenue`
+                : undefined
+            }
+          />
+        </div>
+      </Card>
 
       <Card title="Conversion by day">
         {totals.visits > 0 ? (

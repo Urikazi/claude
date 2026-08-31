@@ -152,6 +152,11 @@ The comparison reports whether a move is larger than the order counts alone woul
 chance. That is not proof: a logged change is not a controlled experiment, and traffic mix, spend
 and season move conversion too. Treat "likely better" as worth a closer look, not as a result.
 
+Revenue is never filtered by customer type — the P&L counts every order, repeat buyers included.
+The split on this page divides that same total so you can see where it came from. The header shows
+how long ago orders were last pulled in, since a dashboard that disagrees with Shopify's live view
+is usually behind it rather than wrong.
+
 Whether a customer is new is worked out from the earliest order held for them, not from Shopify's
 lifetime order count, which describes the customer today and would relabel past orders every time
 someone bought again. Customers whose first purchase predates your synced history therefore read

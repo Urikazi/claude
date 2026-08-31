@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { DEFAULT_TIME_ZONE, addDays, daysBetween, zonedDayKey } from "@/lib/timezone";
 import type { DateRange } from "@/lib/pnl";
+import { round2 } from "@/lib/fees";
 
 /**
  * Conversion rate is orders divided by sessions, so it needs a traffic denominator
@@ -30,6 +31,10 @@ export type ConversionTotals = {
   cvr: number;
   newCvr: number;
   returningCvr: number;
+  /** Net of refunds, and summed over every order — the same figure the P&L reports. */
+  revenue: number;
+  newRevenue: number;
+  returningRevenue: number;
 };
 
 export type ConversionReport = {
@@ -78,7 +83,13 @@ export async function buildConversionReport(
   const [orders, traffic, adSpend, firstIds] = await Promise.all([
     prisma.order.findMany({
       where: { storeId, processedAt: { gte: range.from, lte: range.to } },
-      select: { id: true, processedAt: true, customerId: true },
+      select: {
+        id: true,
+        processedAt: true,
+        customerId: true,
+        total: true,
+        refundedTotal: true,
+      },
     }),
     prisma.dailyTraffic.findMany({
       where: { storeId, date: { gte: range.from, lte: range.to } },
@@ -109,15 +120,21 @@ export async function buildConversionReport(
   }
 
   const ordersByDay = new Map<string, { all: number; fresh: number }>();
+  let revenue = 0;
+  let newRevenue = 0;
   for (const order of orders) {
     const key = zonedDayKey(order.processedAt, timeZone);
     const bucket = ordersByDay.get(key) ?? { all: 0, fresh: 0 };
     bucket.all += 1;
     // An order with no customer is counted as new: a guest checkout we cannot link to
     // an earlier purchase is far more often a first one than a repeat.
-    if (!customersKnown || order.customerId === null || firstIds.has(order.id)) {
-      bucket.fresh += 1;
-    }
+    const isFirst = !customersKnown || order.customerId === null || firstIds.has(order.id);
+    if (isFirst) bucket.fresh += 1;
+    // Revenue is every order, split for reporting only — the total below matches the
+    // P&L exactly, which is the point of showing the two halves next to it.
+    const net = order.total - order.refundedTotal;
+    revenue += net;
+    if (isFirst && customersKnown) newRevenue += net;
     ordersByDay.set(key, bucket);
   }
 
@@ -153,6 +170,9 @@ export async function buildConversionReport(
       cvr: rate(totals.orders, totals.visits),
       newCvr: rate(totals.newOrders, totals.visits),
       returningCvr: rate(totals.orders - totals.newOrders, totals.visits),
+      revenue: round2(revenue),
+      newRevenue: round2(newRevenue),
+      returningRevenue: round2(revenue - newRevenue),
     },
   };
 }

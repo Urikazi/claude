@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/session";
 import { logout } from "@/lib/auth-actions";
 import { SyncButton } from "@/components/sync-button";
 import { NavLinks } from "@/components/nav-links";
+import { LastSynced } from "@/components/last-synced";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +47,12 @@ export default async function DashboardLayout({
             </Suspense>
           </div>
           <span className="hidden text-sm text-muted lg:block">{store.name}</span>
-          <SyncButton storeId={store.id} />
+          <div className="flex items-center gap-3">
+            <Suspense fallback={null}>
+              <LastSynced storeId={store.id} />
+            </Suspense>
+            <SyncButton storeId={store.id} />
+          </div>
         </header>
         <main className="flex-1 px-6 py-6">{children}</main>
       </div>
