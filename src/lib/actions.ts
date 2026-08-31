@@ -7,6 +7,7 @@ import { assertSession } from "@/lib/session";
 import { DEFAULT_FEE_CONFIG } from "@/lib/fees";
 import { parseSpendPaste } from "@/lib/ad-spend-paste";
 import { parsePriceList, priceListToRows } from "@/lib/price-list";
+import { ANY_COUNTRY } from "@/lib/cost-tiers";
 import {
   applyCostTiers,
   recalculateCosts,
@@ -444,5 +445,65 @@ export async function removeSupersededManualSpend(
     message: count
       ? `Removed ${count} manual entr${count === 1 ? "y" : "ies"} on days now covered by ${platform}.`
       : "Nothing to remove — no manual entries overlap the synced days.",
+  };
+}
+
+/** How many quantity steps the per-product editor offers. */
+export const TIER_QUANTITIES = [1, 2, 3, 4, 5] as const;
+
+/**
+ * Per-product quantity pricing, typed in rather than imported.
+ *
+ * Saved against every destination ("*"), since someone entering prices by hand is
+ * describing what an order of N pieces costs them, not a per-country rate card. An
+ * imported country-specific price still wins over this, so a detailed price list is
+ * not undercut by a rough one typed here.
+ *
+ * A blank box means "no price for that quantity" and removes the tier, so clearing
+ * the row falls back to the per-unit cost fields.
+ */
+export async function updateVariantCostTiers(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const storeId = formData.get("storeId")?.toString();
+  const sku = formData.get("sku")?.toString()?.trim();
+  if (!storeId) return { ok: false, message: "Missing store." };
+  if (!sku) {
+    return { ok: false, message: "This variant has no SKU, so quantity prices cannot be matched to it." };
+  }
+
+  const entered: { quantity: number; totalCost: number }[] = [];
+  for (const quantity of TIER_QUANTITIES) {
+    const raw = formData.get(`tier_${quantity}`)?.toString()?.trim();
+    if (!raw) continue;
+    const totalCost = Number(raw);
+    if (!Number.isFinite(totalCost) || totalCost < 0) {
+      return { ok: false, message: `The price for ${quantity} pcs must be a positive number.` };
+    }
+    entered.push({ quantity, totalCost });
+  }
+
+  await prisma.$transaction([
+    prisma.supplierCostTier.deleteMany({ where: { storeId, sku, country: ANY_COUNTRY } }),
+    ...(entered.length
+      ? [
+          prisma.supplierCostTier.createMany({
+            data: entered.map((tier) => ({ storeId, sku, country: ANY_COUNTRY, ...tier })),
+          }),
+        ]
+      : []),
+  ]);
+
+  const priced = await applyCostTiers(storeId);
+  revalidatePath("/dashboard/products");
+  revalidatePath("/dashboard");
+
+  return {
+    ok: true,
+    message: entered.length
+      ? `Saved ${entered.length} quantity price${entered.length === 1 ? "" : "s"}. Repriced ${priced} order lines.`
+      : `Cleared quantity prices for ${sku}. Costs fall back to the per-unit fields.`,
   };
 }

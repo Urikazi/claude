@@ -65,6 +65,16 @@ export default async function ProductsPage({
   });
   const pricedSkus = new Set(bySku.keys());
 
+  // Only the editable "*" tiers are shown in the per-product editor; country-specific
+  // rows come from an imported price list and are managed there.
+  const tiersBySku = new Map<string, Record<number, number>>();
+  for (const [sku, rows] of bySku) {
+    const anyCountry = rows.filter((row) => row.country === "*");
+    if (anyCountry.length) {
+      tiersBySku.set(sku, Object.fromEntries(anyCountry.map((r) => [r.quantity, r.totalCost])));
+    }
+  }
+
   const rows: VariantRow[] = products.flatMap((product) =>
     product.variants.map((variant) => ({
       id: variant.id,
@@ -77,6 +87,7 @@ export default async function ProductsPage({
       handlingCost: variant.handlingCost,
       unitsSold: unitsByVariant.get(variant.id) ?? 0,
       pricedFromList: variant.sku ? pricedSkus.has(variant.sku) : false,
+      tiers: variant.sku ? tiersBySku.get(variant.sku) : undefined,
     })),
   );
 
@@ -137,7 +148,12 @@ export default async function ProductsPage({
               </thead>
               <tbody>
                 {rows.map((variant) => (
-                  <CogsRow key={variant.id} variant={variant} currency={store.currency} />
+                  <CogsRow
+                    key={variant.id}
+                    variant={variant}
+                    currency={store.currency}
+                    storeId={store.id}
+                  />
                 ))}
               </tbody>
             </table>
