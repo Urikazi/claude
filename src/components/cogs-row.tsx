@@ -1,17 +1,13 @@
 "use client";
 
-import { useActionState, useId, useState } from "react";
-import {
-  TIER_QUANTITIES,
-  updateVariantCostTiers,
-  updateVariantCosts,
-  type ActionState,
-} from "@/lib/actions";
+import { useId, useState } from "react";
+import { useActionState } from "react";
+import { updateVariantCosting, type ActionState } from "@/lib/actions";
 import { Td } from "@/components/ui";
 import { formatMoney, formatPercent } from "@/lib/format";
 
 const cellInput =
-  "w-full max-w-28 rounded-md border border-line bg-panel-2 px-2 py-1.5 text-right text-sm tabular-nums outline-none transition focus:border-accent";
+  "w-28 rounded-md border border-line bg-panel-2 px-2 py-1.5 text-right text-sm tabular-nums outline-none transition focus:border-accent";
 
 export type VariantRow = {
   id: string;
@@ -19,17 +15,18 @@ export type VariantRow = {
   variantTitle: string;
   sku: string | null;
   price: number;
-  cogs: number;
-  shippingCost: number;
-  handlingCost: number;
   unitsSold: number;
-  /// Costed by the supplier price list, so the per-unit fields are unused.
-  pricedFromList?: boolean;
-  /// Existing quantity prices for this SKU, keyed by quantity.
-  tiers?: Record<number, number>;
-  /// Set when the cost comes from a shorter, shared SKU rather than this exact one.
+  /** Cost of a single unit, from the quantity-1 tier. */
+  costPerUnit: number;
+  /** Totals for larger quantities: 2 units cost this much in all, not each. */
+  bundles: { quantity: number; totalCost: number }[];
+  /** Set when costs come from a shorter, shared SKU rather than this exact one. */
   inheritedTierSku?: string;
+  /** Set when an imported list prices this SKU per destination, which wins here. */
+  countryPricedSku?: string;
 };
+
+type BundleDraft = { key: string; quantity: string; totalCost: string };
 
 export function CogsRow({
   variant,
@@ -41,164 +38,217 @@ export function CogsRow({
   storeId: string;
 }) {
   const formId = useId();
-  const tierFormId = useId();
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
-    updateVariantCosts,
-    null,
-  );
-  const [tierState, tierAction, tierPending] = useActionState<ActionState, FormData>(
-    updateVariantCostTiers,
+    updateVariantCosting,
     null,
   );
   const [open, setOpen] = useState(false);
-
-  // Mirrors the inputs so the margin column updates as the operator types.
-  const [draft, setDraft] = useState({
-    cogs: variant.cogs,
-    shippingCost: variant.shippingCost,
-    handlingCost: variant.handlingCost,
-  });
-
-  const tierCount = Object.keys(variant.tiers ?? {}).length;
-  const quantityPriced = tierCount > 0 || Boolean(variant.inheritedTierSku);
-  const totalCost = draft.cogs + draft.shippingCost + draft.handlingCost;
-  const unitMargin = variant.price - totalCost;
-  const marginPercent = variant.price > 0 ? (unitMargin / variant.price) * 100 : 0;
-
-  const numberField = (name: keyof typeof draft, label: string) => (
-    <input
-      form={formId}
-      name={name}
-      type="number"
-      step="0.01"
-      min="0"
-      value={draft[name]}
-      onChange={(event) =>
-        setDraft((current) => ({ ...current, [name]: Number(event.target.value) || 0 }))
-      }
-      className={cellInput}
-      disabled={quantityPriced}
-      aria-label={`${label} for ${variant.productTitle}`}
-    />
+  const [unit, setUnit] = useState(variant.costPerUnit ? String(variant.costPerUnit) : "");
+  const [bundles, setBundles] = useState<BundleDraft[]>(
+    variant.bundles.map((bundle, index) => ({
+      key: `existing-${index}`,
+      quantity: String(bundle.quantity),
+      totalCost: String(bundle.totalCost),
+    })),
   );
+
+  const unitCost = Number(unit) || 0;
+  const margin = variant.price > 0 ? ((variant.price - unitCost) / variant.price) * 100 : 0;
+
+  function addBundle() {
+    // Suggest the next quantity up, which is nearly always what is wanted.
+    const highest = bundles.reduce((max, b) => Math.max(max, Number(b.quantity) || 1), 1);
+    setBundles((current) => [
+      ...current,
+      { key: `new-${Date.now()}`, quantity: String(highest + 1), totalCost: "" },
+    ]);
+  }
 
   return (
     <>
-      <tr>
+      <tr className="align-top">
         <Td>
           <span className="block">{variant.productTitle}</span>
           <span className="text-[11px] text-muted">
             {variant.variantTitle !== "Default Title" ? variant.variantTitle : ""}
             {variant.sku ? ` · ${variant.sku}` : ""}
           </span>
-          {quantityPriced ? (
+          {variant.inheritedTierSku ? (
             <span
               className="ml-2 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted"
-              title={
-                variant.inheritedTierSku
-                  ? `Priced by quantity under ${variant.inheritedTierSku}, which covers every shade of this product.`
-                  : "Cost comes from quantity pricing, which prices the whole line at once. The per-unit fields on this row are unused."
-              }
+              title={`Costed under ${variant.inheritedTierSku}, which covers every variant of this product.`}
             >
-              {variant.inheritedTierSku ? `priced as ${variant.inheritedTierSku}` : "quantity priced"}
+              costed as {variant.inheritedTierSku}
             </span>
           ) : null}
         </Td>
         <Td align="right">{formatMoney(variant.price, currency)}</Td>
         <Td align="right">{variant.unitsSold}</Td>
-        <Td align="right">{numberField("cogs", "Cost of goods")}</Td>
-        <Td align="right">{numberField("shippingCost", "Shipping cost")}</Td>
-        <Td align="right">{numberField("handlingCost", "Handling cost")}</Td>
+
         <Td align="right">
-          {quantityPriced ? (
-            <span className="text-[11px] text-muted">by quantity</span>
-          ) : (
+          <input
+            form={formId}
+            name="costPerUnit"
+            type="number"
+            step="0.01"
+            min="0"
+            value={unit}
+            onChange={(event) => setUnit(event.target.value)}
+            placeholder="0.00"
+            className={cellInput}
+            aria-label={`Cost per unit for ${variant.productTitle}`}
+          />
+        </Td>
+
+        <Td>
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            aria-expanded={open}
+            className="rounded-md border border-line px-2.5 py-1.5 text-xs text-muted transition hover:border-accent hover:text-body"
+          >
+            {bundles.length} bundle{bundles.length === 1 ? "" : "s"}
+          </button>
+        </Td>
+
+        <Td align="right">
+          {unitCost > 0 ? (
             <>
-              <span className={unitMargin >= 0 ? "text-pos" : "text-neg"}>
-                {formatMoney(unitMargin, currency)}
+              <span className={variant.price - unitCost >= 0 ? "text-pos" : "text-neg"}>
+                {formatMoney(variant.price - unitCost, currency)}
               </span>
-              <span className="ml-1 text-[11px] text-muted">{formatPercent(marginPercent)}</span>
+              <span className="ml-1 text-[11px] text-muted">{formatPercent(margin)}</span>
             </>
+          ) : (
+            <span className="text-[11px] text-muted">—</span>
           )}
         </Td>
+
         <Td align="right">
-          <div className="flex items-center justify-end gap-1.5">
-            <button
-              type="button"
-              onClick={() => setOpen((value) => !value)}
-              className="rounded-md border border-line px-2 py-1.5 text-xs text-muted transition hover:border-accent hover:text-body"
-              aria-expanded={open}
-            >
-              {tierCount > 0 ? `${tierCount} qty` : "Qty"}
-            </button>
-            <form action={formAction} id={formId}>
-              <input type="hidden" name="variantId" value={variant.id} />
-            </form>
-            <button
-              type="submit"
-              form={formId}
-              disabled={pending || quantityPriced}
-              title={quantityPriced ? "Quantity pricing is in use for this SKU" : undefined}
-              className="rounded-md border border-line bg-panel-2 px-2.5 py-1.5 text-xs transition hover:border-accent disabled:opacity-50"
-            >
-              {pending ? "…" : state?.ok ? "Saved" : "Save"}
-            </button>
-          </div>
+          <form action={formAction} id={formId} className="inline">
+            <input type="hidden" name="storeId" value={storeId} />
+            <input type="hidden" name="sku" value={variant.sku ?? ""} />
+          </form>
+          <button
+            type="submit"
+            form={formId}
+            disabled={pending || !variant.sku}
+            title={variant.sku ? undefined : "This variant has no SKU in Shopify"}
+            className="rounded-md border border-line bg-panel-2 px-2.5 py-1.5 text-xs transition hover:border-accent disabled:opacity-50"
+          >
+            {pending ? "…" : state?.ok ? "Saved" : "Save"}
+          </button>
         </Td>
       </tr>
 
       {open ? (
         <tr>
-          <td colSpan={8} className="border-b border-line bg-panel-2/40 px-4 py-4">
-            {variant.sku ? (
-              <form action={tierAction} id={tierFormId} className="space-y-3">
-                <input type="hidden" name="storeId" value={storeId} />
-                <input type="hidden" name="sku" value={variant.sku} />
-                <p className="text-xs text-muted">
-                  Cost of a whole order line, not per unit. If 2 pieces cost you 9.99 rather
-                  than twice the single price, enter 9.99 against 2 pcs. Leave a box empty if
-                  you have no price for that quantity; clear them all to go back to the
-                  per-unit fields above.
+          <td colSpan={7} className="border-b border-line bg-panel-2/40 px-4 py-4">
+            <div className="max-w-xl space-y-3">
+              <div>
+                <p className="text-xs font-medium">Bundle costs</p>
+                <p className="mt-1 text-xs text-muted">
+                  What that many units cost you <strong>in total</strong>, not each. If 2 cost
+                  9.99 rather than twice a single, enter 2 and 9.99. Quantities you do not
+                  list are worked out from the ones you do.
                 </p>
-                <div className="flex flex-wrap items-end gap-3">
-                  {TIER_QUANTITIES.map((quantity) => (
-                    <label key={quantity} className="block">
-                      <span className="mb-1 block text-[11px] text-muted">
-                        {quantity} {quantity === 1 ? "pc" : "pcs"}
-                      </span>
-                      <input
-                        name={`tier_${quantity}`}
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        defaultValue={variant.tiers?.[quantity] ?? ""}
-                        placeholder="—"
-                        className="w-24 rounded-md border border-line bg-panel px-2 py-1.5 text-right text-sm tabular-nums outline-none transition focus:border-accent"
-                        aria-label={`Cost for ${quantity} pieces of ${variant.productTitle}`}
-                      />
-                    </label>
-                  ))}
-                  <button
-                    type="submit"
-                    form={tierFormId}
-                    disabled={tierPending}
-                    className="rounded-md border border-line bg-panel-2 px-3 py-1.5 text-xs transition hover:border-accent disabled:opacity-50"
-                  >
-                    {tierPending ? "Saving…" : "Save quantity prices"}
-                  </button>
-                </div>
-                {tierState ? (
-                  <p className={`text-xs ${tierState.ok ? "text-pos" : "text-neg"}`}>
-                    {tierState.message}
-                  </p>
+              </div>
+
+              <div className="space-y-2">
+                {bundles.map((bundle, index) => (
+                  <div key={bundle.key} className="flex items-center gap-2">
+                    <input
+                      form={formId}
+                      name="bundleQuantity"
+                      type="number"
+                      min="2"
+                      step="1"
+                      value={bundle.quantity}
+                      onChange={(event) =>
+                        setBundles((current) =>
+                          current.map((b, i) =>
+                            i === index ? { ...b, quantity: event.target.value } : b,
+                          ),
+                        )
+                      }
+                      className="w-20 rounded-md border border-line bg-panel px-2 py-1.5 text-right text-sm tabular-nums outline-none focus:border-accent"
+                      aria-label="Bundle quantity"
+                    />
+                    <span className="text-xs text-muted">units cost</span>
+                    <input
+                      form={formId}
+                      name="bundleCost"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={bundle.totalCost}
+                      onChange={(event) =>
+                        setBundles((current) =>
+                          current.map((b, i) =>
+                            i === index ? { ...b, totalCost: event.target.value } : b,
+                          ),
+                        )
+                      }
+                      placeholder="0.00"
+                      className="w-28 rounded-md border border-line bg-panel px-2 py-1.5 text-right text-sm tabular-nums outline-none focus:border-accent"
+                      aria-label="Total cost for the bundle"
+                    />
+                    <span className="w-24 text-right text-[11px] text-muted">
+                      {Number(bundle.totalCost) > 0 && Number(bundle.quantity) > 0
+                        ? `${formatMoney(Number(bundle.totalCost) / Number(bundle.quantity), currency)}/unit`
+                        : ""}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setBundles((current) => current.filter((_, i) => i !== index))
+                      }
+                      aria-label={`Remove the ${bundle.quantity}-unit bundle`}
+                      className="rounded-md border border-line px-2 py-1.5 text-xs text-neg transition hover:border-neg"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={addBundle}
+                  className="rounded-md border border-line px-2.5 py-1.5 text-xs transition hover:border-accent"
+                >
+                  + Add bundle
+                </button>
+                <button
+                  type="submit"
+                  form={formId}
+                  disabled={pending || !variant.sku}
+                  className="rounded-md border border-line bg-panel-2 px-3 py-1.5 text-xs transition hover:border-accent disabled:opacity-50"
+                >
+                  {pending ? "Saving…" : "Save costs"}
+                </button>
+                {state ? (
+                  <span className={`text-xs ${state.ok ? "text-pos" : "text-neg"}`}>
+                    {state.message}
+                  </span>
                 ) : null}
-              </form>
-            ) : (
-              <p className="text-xs text-neg">
-                This variant has no SKU in Shopify, so quantity prices cannot be matched to
-                it. Add a SKU to the variant in Shopify and sync again.
-              </p>
-            )}
+              </div>
+
+              {variant.countryPricedSku ? (
+                <p className="text-xs text-muted">
+                  An imported price list also covers{" "}
+                  <code>{variant.countryPricedSku}</code> per destination. Those prices win
+                  for the countries they name; what you enter here applies everywhere else.
+                </p>
+              ) : null}
+              {!variant.sku ? (
+                <p className="text-xs text-neg">
+                  This variant has no SKU in Shopify, so costs cannot be matched to its
+                  orders. Add one in Shopify and sync again.
+                </p>
+              ) : null}
+            </div>
           </td>
         </tr>
       ) : null}

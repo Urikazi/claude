@@ -460,21 +460,17 @@ export async function removeSupersededManualSpend(
   };
 }
 
-/** Quantity steps the per-product editor offers. Larger orders extrapolate. */
-export const TIER_QUANTITIES = [1, 2, 3, 4, 5, 6] as const;
-
 /**
- * Per-product quantity pricing, typed in rather than imported.
+ * Per-unit cost plus bundle prices for a SKU.
  *
- * Saved against every destination ("*"), since someone entering prices by hand is
- * describing what an order of N pieces costs them, not a per-country rate card. An
- * imported country-specific price still wins over this, so a detailed price list is
- * not undercut by a rough one typed here.
+ * A fulfilment quote gives one price for a single item and a cheaper total for
+ * several, because the parcel ships once. Quantity 1 is the unit cost; every other
+ * quantity is a bundle holding the total for that many units, not a per-unit rate.
  *
- * A blank box means "no price for that quantity" and removes the tier, so clearing
- * the row falls back to the per-unit cost fields.
+ * Quantities are whatever the supplier quoted rather than a fixed set of slots — some
+ * products are priced in threes, some to six, some only singly.
  */
-export async function updateVariantCostTiers(
+export async function updateVariantCosting(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
@@ -483,30 +479,51 @@ export async function updateVariantCostTiers(
   const sku = formData.get("sku")?.toString()?.trim();
   if (!storeId) return { ok: false, message: "Missing store." };
   if (!sku) {
-    return { ok: false, message: "This variant has no SKU, so quantity prices cannot be matched to it." };
+    return { ok: false, message: "This variant has no SKU, so costs cannot be matched to its orders." };
   }
 
-  const entered: { quantity: number; totalCost: number }[] = [];
-  for (const quantity of TIER_QUANTITIES) {
-    const raw = formData.get(`tier_${quantity}`)?.toString()?.trim();
-    if (!raw) continue;
-    const totalCost = Number(raw);
-    if (!Number.isFinite(totalCost) || totalCost < 0) {
-      return { ok: false, message: `The price for ${quantity} pcs must be a positive number.` };
+  const readAmount = (value: FormDataEntryValue | null): number | null => {
+    const raw = value?.toString().trim();
+    if (!raw) return null;
+    const amount = Number(raw);
+    return Number.isFinite(amount) && amount >= 0 ? amount : null;
+  };
+
+  const tiers = new Map<number, number>();
+
+  const unitRaw = formData.get("costPerUnit")?.toString().trim();
+  if (unitRaw) {
+    const unit = readAmount(unitRaw);
+    if (unit === null) return { ok: false, message: "Cost per unit must be a positive number." };
+    if (unit > 0) tiers.set(1, unit);
+  }
+
+  const quantities = formData.getAll("bundleQuantity");
+  const totals = formData.getAll("bundleCost");
+  for (let i = 0; i < quantities.length; i += 1) {
+    const quantity = Number(quantities[i]?.toString().trim());
+    const total = readAmount(totals[i] ?? null);
+    // A row the user started and left blank is skipped rather than rejected.
+    if (!Number.isInteger(quantity) || quantity < 2) {
+      if (total === null) continue;
+      return { ok: false, message: "Bundle quantities must be whole numbers of 2 or more." };
     }
-    entered.push({ quantity, totalCost });
+    if (total === null) continue;
+    tiers.set(quantity, total);
   }
 
   await prisma.$transaction([
-    // Scoped to the quantities this form manages, so tiers imported beyond its range
-    // are not quietly dropped by a save here.
-    prisma.supplierCostTier.deleteMany({
-      where: { storeId, sku, country: ANY_COUNTRY, quantity: { in: [...TIER_QUANTITIES] } },
-    }),
-    ...(entered.length
+    prisma.supplierCostTier.deleteMany({ where: { storeId, sku, country: ANY_COUNTRY } }),
+    ...(tiers.size
       ? [
           prisma.supplierCostTier.createMany({
-            data: entered.map((tier) => ({ storeId, sku, country: ANY_COUNTRY, ...tier })),
+            data: [...tiers.entries()].map(([quantity, totalCost]) => ({
+              storeId,
+              sku,
+              country: ANY_COUNTRY,
+              quantity,
+              totalCost,
+            })),
           }),
         ]
       : []),
@@ -516,11 +533,12 @@ export async function updateVariantCostTiers(
   revalidatePath("/dashboard/products");
   revalidatePath("/dashboard");
 
+  const bundles = tiers.size - (tiers.has(1) ? 1 : 0);
   return {
     ok: true,
-    message: entered.length
-      ? `Saved ${entered.length} quantity price${entered.length === 1 ? "" : "s"}. Repriced ${priced} order lines.`
-      : `Cleared quantity prices for ${sku}. Costs fall back to the per-unit fields.`,
+    message: tiers.size
+      ? `Saved${tiers.has(1) ? " unit cost" : ""}${bundles ? ` and ${bundles} bundle${bundles === 1 ? "" : "s"}` : ""}. Repriced ${priced} order lines.`
+      : `Cleared costs for ${sku}.`,
   };
 }
 

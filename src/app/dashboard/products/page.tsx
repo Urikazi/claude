@@ -66,39 +66,45 @@ export default async function ProductsPage({
   });
   const pricedSkus = new Set(bySku.keys());
 
-  // Only the editable "*" tiers are shown in the per-product editor; country-specific
-  // rows come from an imported price list and are managed there.
-  const tiersBySku = new Map<string, Record<number, number>>();
-  for (const [sku, rows] of bySku) {
-    const anyCountry = rows.filter((row) => row.country === "*");
-    if (anyCountry.length) {
-      tiersBySku.set(sku, Object.fromEntries(anyCountry.map((r) => [r.quantity, r.totalCost])));
-    }
+  // The editor owns the "*" tiers; country-specific rows come from an imported price
+  // list and are managed there, so they are surfaced as a note rather than edited.
+  const anyCountryBySku = new Map<string, { quantity: number; totalCost: number }[]>();
+  const countryPricedSkus = new Set<string>();
+  for (const [sku, tierRows] of bySku) {
+    const shared = tierRows
+      .filter((row) => row.country === "*")
+      .map(({ quantity, totalCost }) => ({ quantity, totalCost }))
+      .sort((a, b) => a.quantity - b.quantity);
+    if (shared.length) anyCountryBySku.set(sku, shared);
+    if (tierRows.some((row) => row.country !== "*")) countryPricedSkus.add(sku);
   }
 
   const rows: VariantRow[] = products.flatMap((product) =>
-    product.variants.map((variant) => ({
-      id: variant.id,
-      productTitle: product.title,
-      variantTitle: variant.title,
-      sku: variant.sku,
-      price: variant.price,
-      cogs: variant.cogs,
-      shippingCost: variant.shippingCost,
-      handlingCost: variant.handlingCost,
-      unitsSold: unitsByVariant.get(variant.id) ?? 0,
-      // A shade variant (FL2600896-M) is covered by the family price (FL2600896).
-      pricedFromList: resolveTierSku(pricedSkus, variant.sku) !== null,
-      tiers: variant.sku ? tiersBySku.get(variant.sku) : undefined,
-      inheritedTierSku:
-        resolveTierSku(pricedSkus, variant.sku) !== variant.sku
-          ? (resolveTierSku(pricedSkus, variant.sku) ?? undefined)
-          : undefined,
-    })),
+    product.variants.map((variant) => {
+      // A shade variant (FL2600896-M) is costed under the family SKU (FL2600896).
+      const costedAs = resolveTierSku(pricedSkus, variant.sku);
+      const own = costedAs ? (anyCountryBySku.get(costedAs) ?? []) : [];
+      const unitTier = own.find((tier) => tier.quantity === 1);
+      return {
+        id: variant.id,
+        productTitle: product.title,
+        variantTitle: variant.title,
+        sku: variant.sku,
+        price: variant.price,
+        unitsSold: unitsByVariant.get(variant.id) ?? 0,
+        // The per-unit field is the fallback for a SKU with no tier of its own.
+        costPerUnit: unitTier?.totalCost ?? variant.cogs,
+        bundles: own
+          .filter((tier) => tier.quantity > 1)
+          .map(({ quantity, totalCost }) => ({ quantity, totalCost })),
+        inheritedTierSku: costedAs && costedAs !== variant.sku ? costedAs : undefined,
+        countryPricedSku: costedAs && countryPricedSkus.has(costedAs) ? costedAs : undefined,
+      };
+    }),
   );
 
   // Best-sellers without a cost are the most expensive gap in the P&L, so surface them first.
-  const uncosted = (row: VariantRow) => row.cogs === 0 && !row.pricedFromList;
+  const uncosted = (row: VariantRow) => row.costPerUnit === 0 && row.bundles.length === 0;
 
   rows.sort((a, b) => {
     if (uncosted(a) && !uncosted(b)) return -1;
@@ -113,8 +119,9 @@ export default async function ProductsPage({
       <div>
         <h1 className="text-xl font-semibold">Products &amp; COGS</h1>
         <p className="mt-0.5 text-sm text-muted">
-          Enter unit costs here. They are deducted from every order containing the variant, past
-          and future.
+          Cost per unit is what a single item costs you. Bundle costs are what several cost
+          in total, which is usually less than the multiple. Both apply to past orders as
+          well as future ones.
         </p>
       </div>
 
@@ -143,12 +150,11 @@ export default async function ProductsPage({
             <table className="w-full min-w-[900px]">
               <thead>
                 <tr>
-                  <Th>Product</Th>
+                  <Th>Product &amp; variant</Th>
                   <Th align="right">Price</Th>
-                  <Th align="right">Units</Th>
-                  <Th align="right">COGS</Th>
-                  <Th align="right">Shipping</Th>
-                  <Th align="right">Handling</Th>
+                  <Th align="right">Units sold</Th>
+                  <Th align="right">Cost per unit</Th>
+                  <Th>Bundle costs</Th>
                   <Th align="right">Unit margin</Th>
                   <Th align="right">&nbsp;</Th>
                 </tr>
