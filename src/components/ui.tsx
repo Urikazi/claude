@@ -26,15 +26,45 @@ export function Card({
   );
 }
 
+/**
+ * Period-over-period change. Rendered green or red by whether the movement is good
+ * for the business, not by its sign: costs rising is not an improvement, so a metric
+ * says which direction it wants via `higherIsBetter`.
+ */
+export function Delta({
+  change,
+  higherIsBetter = true,
+}: {
+  change: number | null;
+  higherIsBetter?: boolean;
+}) {
+  if (change === null) {
+    return <span className="text-xs text-muted">no prior period</span>;
+  }
+  if (Math.abs(change) < 0.05) {
+    return <span className="text-xs text-muted">no change</span>;
+  }
+  const good = higherIsBetter ? change > 0 : change < 0;
+  return (
+    <span className={`text-xs tabular-nums ${good ? "text-pos" : "text-neg"}`}>
+      {change > 0 ? "▲" : "▼"} {Math.abs(change).toFixed(1)}%
+    </span>
+  );
+}
+
 export function Stat({
   label,
   value,
   hint,
+  change,
+  higherIsBetter = true,
   tone = "neutral",
 }: {
   label: string;
   value: string;
   hint?: string;
+  change?: number | null;
+  higherIsBetter?: boolean;
   tone?: "neutral" | "positive" | "negative" | "auto";
   }) {
   const toneClass =
@@ -52,6 +82,11 @@ export function Stat({
       <div className={`mt-2 text-2xl font-semibold tabular-nums ${toneClass}`}>
         {value}
       </div>
+      {change !== undefined ? (
+        <div className="mt-1">
+          <Delta change={change} higherIsBetter={higherIsBetter} />
+        </div>
+      ) : null}
       {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
     </div>
   );

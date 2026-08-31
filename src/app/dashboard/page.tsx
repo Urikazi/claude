@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { buildPnlReport, buildProductPnl } from "@/lib/pnl";
+import { buildPnlReport, buildProductPnl, percentChange, previousRange } from "@/lib/pnl";
 import { getActiveStore } from "@/lib/store";
 import { formatMoney, formatNumber, formatPercent, resolveRange } from "@/lib/format";
-import { Card, Empty, Stat, Td, Th } from "@/components/ui";
+import { Card, Delta, Empty, Stat, Td, Th } from "@/components/ui";
+import { CostBreakdown } from "@/components/cost-breakdown";
 import { PnlChart } from "@/components/pnl-chart";
 import { RangePicker } from "@/components/range-picker";
 
@@ -19,8 +20,9 @@ export default async function OverviewPage({
   const range = resolveRange(rangeParam, from, to, store.timezone);
   const currency = store.currency;
 
-  const [report, products, missingCosts] = await Promise.all([
+  const [report, previous, products, missingCosts] = await Promise.all([
     buildPnlReport(store.id, range),
+    buildPnlReport(store.id, previousRange(range)),
     buildProductPnl(store.id, range),
     prisma.productVariant.count({
       where: { product: { storeId: store.id }, cogs: 0 },
@@ -28,8 +30,22 @@ export default async function OverviewPage({
   ]);
 
   const { totals } = report;
+  const prior = previous.totals;
   const totalCosts = totals.cogs + totals.shippingCost + totals.handlingCost;
   const totalFees = totals.processorFees + totals.shopifyFees;
+  const priorCosts = prior.cogs + prior.shippingCost + prior.handlingCost;
+  const priorFees = prior.processorFees + prior.shopifyFees;
+  const allCosts = totalCosts + totalFees + totals.adSpend;
+
+  const costSlices = [
+    { label: "Cost of goods", value: totals.cogs },
+    { label: "Ad spend", value: totals.adSpend },
+    { label: "Shipping", value: totals.shippingCost },
+    { label: "Transaction fees", value: totalFees },
+    { label: "Handling", value: totals.handlingCost },
+  ];
+
+  const change = (current: number, was: number) => percentChange(current, was);
 
   const waterfall: { label: string; value: number; kind: "in" | "out" | "result" }[] = [
     { label: "Net revenue", value: totals.netRevenue, kind: "in" },
@@ -62,20 +78,65 @@ export default async function OverviewPage({
         </div>
       )}
 
+      {/* The one number the whole page exists to produce, sized to say so. */}
+      <div className="rounded-xl border border-line bg-panel p-5">
+        <div className="flex flex-wrap items-end justify-between gap-6">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted">
+              Net profit
+            </p>
+            <p
+              className={`mt-1 text-4xl font-semibold tabular-nums ${
+                totals.netProfit >= 0 ? "text-pos" : "text-neg"
+              }`}
+            >
+              {formatMoney(totals.netProfit, currency)}
+            </p>
+            <p className="mt-1 flex items-center gap-2 text-xs text-muted">
+              <Delta change={change(totals.netProfit, prior.netProfit)} />
+              <span>vs previous {range.days === 1 ? "day" : `${range.days} days`}</span>
+              <span className="tabular-nums">
+                {formatMoney(prior.netProfit, currency)}
+              </span>
+            </p>
+          </div>
+          <dl className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-4">
+            {[
+              { label: "Orders", value: formatNumber(totals.orders), c: change(totals.orders, prior.orders), up: true },
+              { label: "Units sold", value: formatNumber(totals.units), c: change(totals.units, prior.units), up: true },
+              { label: "Margin", value: formatPercent(totals.margin), c: change(totals.margin, prior.margin), up: true },
+              { label: "POAS", value: `${totals.poas.toFixed(2)}x`, c: change(totals.poas, prior.poas), up: true },
+            ].map((item) => (
+              <div key={item.label}>
+                <dt className="text-xs text-muted">{item.label}</dt>
+                <dd className="mt-0.5 text-lg font-semibold tabular-nums">{item.value}</dd>
+                <Delta change={item.c} higherIsBetter={item.up} />
+              </div>
+            ))}
+          </dl>
+        </div>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Stat
           label="Net revenue"
           value={formatMoney(totals.netRevenue, currency)}
-          hint={`${formatNumber(totals.orders)} orders · AOV ${formatMoney(totals.aov, currency)}`}
+          change={change(totals.netRevenue, prior.netRevenue)}
+          hint={`AOV ${formatMoney(totals.aov, currency)}`}
         />
         <Stat
           label="Ad spend"
           value={formatMoney(totals.adSpend, currency)}
+          change={change(totals.adSpend, prior.adSpend)}
+          // Spending more is not itself bad, but on this page it is a cost line.
+          higherIsBetter={false}
           hint={`ROAS ${totals.roas.toFixed(2)}x · CPA ${formatMoney(totals.cpa, currency)}`}
         />
         <Stat
           label="COGS"
           value={formatMoney(totalCosts, currency)}
+          change={change(totalCosts, priorCosts)}
+          higherIsBetter={false}
           hint={
             totals.netRevenue > 0
               ? `${formatPercent((totalCosts / totals.netRevenue) * 100)} of revenue`
@@ -85,6 +146,8 @@ export default async function OverviewPage({
         <Stat
           label="Fees"
           value={formatMoney(totalFees, currency)}
+          change={change(totalFees, priorFees)}
+          higherIsBetter={false}
           hint={
             totals.netRevenue > 0
               ? `${formatPercent((totalFees / totals.netRevenue) * 100)} of revenue`
@@ -92,10 +155,10 @@ export default async function OverviewPage({
           }
         />
         <Stat
-          label="Net profit"
-          value={formatMoney(totals.netProfit, currency)}
-          hint={`Margin ${formatPercent(totals.margin)} · POAS ${totals.poas.toFixed(2)}x`}
-          tone={totals.netProfit >= 0 ? "positive" : "negative"}
+          label="Gross profit"
+          value={formatMoney(totals.grossProfit, currency)}
+          change={change(totals.grossProfit, prior.grossProfit)}
+          hint="Before ad spend"
         />
       </div>
 
@@ -112,6 +175,49 @@ export default async function OverviewPage({
           <PnlChart data={report.daily} currency={currency} />
         )}
       </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Cost breakdown">
+          <CostBreakdown slices={costSlices} currency={currency} />
+        </Card>
+
+        <Card title="Order summary">
+          <dl className="divide-y divide-line text-sm">
+            {[
+              ["Average order value", formatMoney(totals.aov, currency)],
+              [
+                "Ad spend per order",
+                formatMoney(totals.orders ? totals.adSpend / totals.orders : 0, currency),
+              ],
+              [
+                "Average order cost",
+                formatMoney(
+                  totals.orders ? (totalCosts + totalFees) / totals.orders : 0,
+                  currency,
+                ),
+              ],
+              [
+                "Average order profit",
+                formatMoney(totals.orders ? totals.netProfit / totals.orders : 0, currency),
+              ],
+              ["Units per order", totals.orders ? (totals.units / totals.orders).toFixed(2) : "0"],
+              ["Blended ROAS", `${totals.roas.toFixed(2)}x`],
+              ["POAS", `${totals.poas.toFixed(2)}x`],
+              [
+                "Cost as share of revenue",
+                totals.netRevenue > 0
+                  ? formatPercent((allCosts / totals.netRevenue) * 100)
+                  : "—",
+              ],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between py-2">
+                <dt className="text-muted">{label}</dt>
+                <dd className="tabular-nums">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </Card>
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="P&L breakdown">

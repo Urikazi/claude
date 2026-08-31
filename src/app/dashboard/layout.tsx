@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { getActiveStore } from "@/lib/store";
 import { requireSession } from "@/lib/session";
@@ -16,25 +17,39 @@ export default async function DashboardLayout({
   const store = await getActiveStore();
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-[1400px] flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-line px-6 py-4">
-        <div className="flex items-baseline gap-3">
-          <Link href="/dashboard" className="text-base font-semibold">
-            PNL Dashboard
+    <div className="flex min-h-screen">
+      <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-panel lg:flex">
+        <div className="px-5 py-5">
+          <Link href="/dashboard" className="block text-sm font-semibold">
+            {store.name}
           </Link>
-          <span className="text-sm text-muted">{store.name}</span>
+          <p className="mt-0.5 text-xs text-muted">Profit &amp; loss</p>
         </div>
-        <div className="flex items-center gap-3">
-          <NavLinks />
+        <div className="flex-1 px-2">
+          {/* useSearchParams needs a boundary; the nav is not worth blocking the page for. */}
+          <Suspense fallback={null}>
+            <NavLinks />
+          </Suspense>
+        </div>
+        <form action={logout} className="border-t border-line px-5 py-4">
+          <button type="submit" className="text-xs text-muted hover:text-body">
+            Sign out
+          </button>
+        </form>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-6 py-3">
+          <div className="lg:hidden">
+            <Suspense fallback={null}>
+              <NavLinks />
+            </Suspense>
+          </div>
+          <span className="hidden text-sm text-muted lg:block">{store.name}</span>
           <SyncButton storeId={store.id} />
-          <form action={logout}>
-            <button type="submit" className="text-xs text-muted hover:text-fg">
-              Sign out
-            </button>
-          </form>
-        </div>
-      </header>
-      <main className="flex-1 px-6 py-6">{children}</main>
+        </header>
+        <main className="flex-1 px-6 py-6">{children}</main>
+      </div>
     </div>
   );
 }

@@ -290,3 +290,24 @@ export async function buildProductPnl(storeId: string, range: DateRange) {
     })
     .sort((a, b) => b.revenue - a.revenue);
 }
+
+/**
+ * The equivalent window immediately before this one, same length.
+ *
+ * A profit figure on its own says nothing about whether the week went well; the
+ * comparison is what makes it a number worth acting on.
+ */
+export function previousRange(range: DateRange): DateRange {
+  const span = range.to.getTime() - range.from.getTime() + 1;
+  return {
+    from: new Date(range.from.getTime() - span),
+    to: new Date(range.from.getTime() - 1),
+    timeZone: range.timeZone,
+  };
+}
+
+/** Percentage change, or null when there is no baseline to compare against. */
+export function percentChange(current: number, previous: number): number | null {
+  if (previous === 0) return current === 0 ? 0 : null;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}

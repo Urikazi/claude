@@ -1,15 +1,26 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #0b0d12;
-  --panel: #12151d;
-  --panel-2: #171b25;
-  --border: #232838;
-  --text: #e8ecf4;
-  --muted: #8d97ad;
-  --accent: #5b8cff;
+  --bg: #0b1f33;
+  --panel: #143047;
+  --panel-2: #1a3a55;
+  --border: #244a6b;
+  --text: #eaf2fa;
+  --muted: #8fa9c2;
+  --accent: #1bbf83;
   --pos: #34d399;
-  --neg: #f87171;
+  --neg: #fb7185;
+
+  /*
+   * Categorical series for the cost breakdown, stepped for the navy chart surface
+   * and validated as a set: worst adjacent CVD dE 8.4, normal-vision 19.3, all above
+   * 3:1 against #143047.
+   */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
 }
 
 @theme inline {
@@ -22,6 +33,11 @@
   --color-accent: var(--accent);
   --color-pos: var(--pos);
   --color-neg: var(--neg);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
 }
 
 html,
