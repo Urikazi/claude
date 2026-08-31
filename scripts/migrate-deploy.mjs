@@ -14,6 +14,38 @@
  */
 import { spawnSync } from "node:child_process";
 
+/**
+ * Turns Prisma's terser failures into the thing to actually do about them.
+ *
+ * P3009 in particular is self-perpetuating: one deploy that died mid-migration leaves
+ * the attempt recorded as failed, and every later deploy then refuses to run until a
+ * human clears it. The site keeps serving the last good build, so the symptom is a
+ * deploy that never arrives rather than an error anyone sees.
+ */
+function explain(output) {
+  if (output.includes("P3009") || output.includes("failed migrations")) {
+    const name = output.match(/`(\d{14}_[a-z0-9_]+)`/i)?.[1];
+    return [
+      "",
+      "A previous deployment left a migration recorded as failed, and Prisma will not",
+      "apply anything further until that record is cleared. Nothing here is wrong with",
+      "the code — later builds cannot start while this stands.",
+      "",
+      "Check whether the migration's changes actually landed, then from a machine with",
+      "DATABASE_URL set to this same database run one of:",
+      "",
+      `  npx prisma migrate resolve --applied ${name ?? "<migration-name>"}   # changes are present`,
+      `  npx prisma migrate resolve --rolled-back ${name ?? "<migration-name>"} # changes are not`,
+      "",
+      "then redeploy.",
+    ].join("\n");
+  }
+  if (output.includes("P3018")) {
+    return "\nA migration failed partway through. The error above names the statement; fix the migration, do not retry.";
+  }
+  return "\nMigration failed for a reason retrying will not fix.";
+}
+
 const ATTEMPTS = 4;
 const BACKOFF_MS = [3000, 8000, 15000];
 
@@ -46,7 +78,7 @@ for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
     console.error(
       transient
         ? `\nMigrations still blocked after ${ATTEMPTS} attempts. Another deployment may be running; retry this build.`
-        : "\nMigration failed for a reason retrying will not fix.",
+        : explain(output),
     );
     process.exit(result.status ?? 1);
   }
