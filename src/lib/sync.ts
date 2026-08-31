@@ -273,31 +273,38 @@ export async function syncMetaAds(
     new Date(),
   );
 
-  for (const row of rows) {
-    const date = new Date(`${row.date}T00:00:00.000Z`);
-    const data = {
-      storeId,
-      date,
-      platform: "meta",
-      campaignId: row.campaignId,
-      campaignName: row.campaignName,
-      spend: row.spend,
-      impressions: row.impressions,
-      clicks: row.clicks,
-      conversions: row.conversions,
-    };
-    await prisma.adSpendEntry.upsert({
-      where: {
-        storeId_date_platform_campaignId: {
+  // Batched for the same reason as orders: a daily-by-campaign breakdown over 60
+  // days is hundreds of rows, and one round trip each does not fit in a request.
+  const CHUNK = 200;
+  for (let start = 0; start < rows.length; start += CHUNK) {
+    await prisma.$transaction(
+      rows.slice(start, start + CHUNK).map((row) => {
+        const date = new Date(`${row.date}T00:00:00.000Z`);
+        const data = {
           storeId,
           date,
           platform: "meta",
           campaignId: row.campaignId,
-        },
-      },
-      create: data,
-      update: data,
-    });
+          campaignName: row.campaignName,
+          spend: row.spend,
+          impressions: row.impressions,
+          clicks: row.clicks,
+          conversions: row.conversions,
+        };
+        return prisma.adSpendEntry.upsert({
+          where: {
+            storeId_date_platform_campaignId: {
+              storeId,
+              date,
+              platform: "meta",
+              campaignId: row.campaignId,
+            },
+          },
+          create: data,
+          update: data,
+        });
+      }),
+    );
   }
 
   const message = `Synced ${rows.length} daily campaign rows.`;
