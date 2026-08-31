@@ -448,8 +448,8 @@ export async function removeSupersededManualSpend(
   };
 }
 
-/** How many quantity steps the per-product editor offers. */
-export const TIER_QUANTITIES = [1, 2, 3, 4, 5] as const;
+/** Quantity steps the per-product editor offers. Larger orders extrapolate. */
+export const TIER_QUANTITIES = [1, 2, 3, 4, 5, 6] as const;
 
 /**
  * Per-product quantity pricing, typed in rather than imported.
@@ -486,7 +486,11 @@ export async function updateVariantCostTiers(
   }
 
   await prisma.$transaction([
-    prisma.supplierCostTier.deleteMany({ where: { storeId, sku, country: ANY_COUNTRY } }),
+    // Scoped to the quantities this form manages, so tiers imported beyond its range
+    // are not quietly dropped by a save here.
+    prisma.supplierCostTier.deleteMany({
+      where: { storeId, sku, country: ANY_COUNTRY, quantity: { in: [...TIER_QUANTITIES] } },
+    }),
     ...(entered.length
       ? [
           prisma.supplierCostTier.createMany({
