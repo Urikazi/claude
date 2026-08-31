@@ -318,6 +318,14 @@
      26.99,
      33.09,
      39.09
+    ],
+    "*": [
+     6.59,
+     9.99,
+     11.99,
+     14.69,
+     17.49,
+     20.29
     ]
    }
   },
@@ -344,6 +352,11 @@
      7.5,
      15.0,
      22.5
+    ],
+    "*": [
+     7.5,
+     15.0,
+     22.5
     ]
    }
   },
@@ -365,5 +378,6 @@
     ]
    }
   }
- ]
+ ],
+ "note": "The \"*\" tiers are the fallback for destinations the supplier did not quote; they mirror the US column. A country listed explicitly always wins over them."
 }
