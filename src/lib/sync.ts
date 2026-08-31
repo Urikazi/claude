@@ -11,6 +11,7 @@ import * as shopify from "@/lib/integrations/shopify";
 import * as meta from "@/lib/integrations/meta-ads";
 import * as stripe from "@/lib/integrations/stripe";
 import * as paypal from "@/lib/integrations/paypal";
+import { safeTimeZone } from "@/lib/timezone";
 
 export type SyncResult = { source: string; records: number; message: string };
 
@@ -193,6 +194,7 @@ export async function syncShopifyOrders(
           processedAt: new Date(order.processedAt),
           financialStatus: order.displayFinancialStatus,
           shippingCountry: order.shippingCountry,
+          customerId: order.customerId,
           subtotal: order.subtotal,
           discountTotal: order.discounts,
           shippingTotal: order.shipping,
@@ -489,4 +491,61 @@ export async function recalculateFees(storeId: string): Promise<number> {
     });
   }
   return orders.length;
+}
+
+/**
+ * Daily store sessions from Shopify's analytics, which conversion rate divides by.
+ *
+ * Kept apart from the orders sync because it needs a different scope and can fail on
+ * its own: a store without `read_reports` should still get revenue, and see a message
+ * saying what to grant rather than an unexplained error.
+ */
+export async function syncShopifySessions(
+  storeId: string,
+  sinceDays = 60,
+): Promise<SyncResult> {
+  const startedAt = new Date();
+  const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
+  const credentials = shopifyCredentials(store);
+
+  const timeZone = safeTimeZone(store.timezone);
+  const until = new Date();
+  const since = new Date(until.getTime() - sinceDays * 86_400_000);
+
+  let rows: { day: string; sessions: number }[];
+  try {
+    rows = await shopify.fetchDailySessions(credentials, since, until);
+  } catch (error) {
+    if (error instanceof shopify.SessionsUnavailableError) {
+      await logSync(storeId, "shopify-sessions", "error", error.message, 0, startedAt);
+      throw new NotConfiguredError(error.message);
+    }
+    throw error;
+  }
+
+  // ShopifyQL reports days in the store's own zone, and traffic is dated at the UTC
+  // midnight of that day, matching how ad spend is stored so the two line up per day.
+  const records = rows.map((row) => ({
+    storeId,
+    date: new Date(`${row.day}T00:00:00.000Z`),
+    sessions: row.sessions,
+  }));
+
+  const CHUNK = 100;
+  for (let start = 0; start < records.length; start += CHUNK) {
+    await prisma.$transaction(
+      records.slice(start, start + CHUNK).map((record) =>
+        prisma.dailyTraffic.upsert({
+          where: { storeId_date: { storeId, date: record.date } },
+          create: record,
+          update: { sessions: record.sessions },
+        }),
+      ),
+    );
+  }
+
+  const total = records.reduce((sum, record) => sum + record.sessions, 0);
+  const message = `Synced ${records.length} days of traffic (${total.toLocaleString("en-US")} sessions), ${timeZone} days.`;
+  await logSync(storeId, "shopify-sessions", "success", message, records.length, startedAt);
+  return { source: "shopify-sessions", records: records.length, message };
 }

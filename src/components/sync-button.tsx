@@ -16,6 +16,7 @@ import { buttonClass } from "@/components/ui";
 const STEPS = [
   { source: "shopify-products", label: "Products" },
   { source: "shopify-orders", label: "Orders" },
+  { source: "shopify-sessions", label: "Sessions" },
   { source: "meta", label: "Meta Ads" },
   { source: "fees", label: "Fees" },
 ] as const;

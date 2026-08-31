@@ -12,12 +12,14 @@ import { parsePriceList, priceListToRows } from "@/lib/price-list";
 // host that only ships the compiled output.
 import bundledPriceList from "../../data/derma-muse-price-list.json";
 import { ANY_COUNTRY } from "@/lib/cost-tiers";
+import { CHANGE_CATEGORIES } from "@/lib/change-categories";
 import {
   applyCostTiers,
   recalculateCosts,
   recalculateFees,
   reconcileProcessorFees,
   syncMetaAds,
+  syncShopifySessions,
   syncShopifyOrders,
   syncShopifyProducts,
   NotConfiguredError,
@@ -211,7 +213,13 @@ export async function updateFeeConfig(
 
 export async function runSync(
   storeId: string,
-  source: "shopify-products" | "shopify-orders" | "meta" | "fees" | "all",
+  source:
+    | "shopify-products"
+    | "shopify-orders"
+    | "shopify-sessions"
+    | "meta"
+    | "fees"
+    | "all",
   days = 60,
   full = false,
 ): Promise<ActionState> {
@@ -222,6 +230,9 @@ export async function runSync(
   }
   if (source === "all" || source === "shopify-orders") {
     tasks.push(() => syncShopifyOrders(storeId, days, full));
+  }
+  if (source === "all" || source === "shopify-sessions") {
+    tasks.push(() => syncShopifySessions(storeId, days));
   }
   if (source === "all" || source === "meta") tasks.push(() => syncMetaAds(storeId, days));
   if (source === "all" || source === "fees") {
@@ -550,4 +561,56 @@ export async function updateVariantCosting(
 export async function importBundledPriceList(storeId: string): Promise<ActionState> {
   await assertSession();
   return applyPriceList(storeId, JSON.stringify(bundledPriceList));
+}
+
+const changeSchema = z.object({
+  storeId: z.string().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  title: z.string().trim().min(1).max(120),
+  category: z.enum(CHANGE_CATEGORIES.map((c) => c.value) as [string, ...string[]]),
+  note: z.string().trim().max(2000).optional(),
+});
+
+export async function logStoreChange(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const parsed = changeSchema.safeParse({
+    storeId: formData.get("storeId"),
+    date: formData.get("date"),
+    title: formData.get("title"),
+    category: formData.get("category") ?? "other",
+    note: formData.get("note")?.toString() || undefined,
+  });
+  if (!parsed.success) {
+    return { ok: false, message: "Give the change a date and a short title." };
+  }
+
+  const { storeId, title, category, note } = parsed.data;
+  await prisma.storeChange.create({
+    data: {
+      storeId,
+      // Dated at UTC midnight of the chosen day, matching ad spend and traffic.
+      date: new Date(`${parsed.data.date}T00:00:00.000Z`),
+      title,
+      category,
+      note: note ?? null,
+    },
+  });
+
+  revalidatePath("/dashboard/conversion");
+  return { ok: true, message: "Change logged." };
+}
+
+export async function deleteStoreChange(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const id = formData.get("id")?.toString();
+  if (!id) return { ok: false, message: "Missing change." };
+  await prisma.storeChange.delete({ where: { id } }).catch(() => null);
+  revalidatePath("/dashboard/conversion");
+  return { ok: true, message: "Change removed." };
 }

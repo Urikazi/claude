@@ -116,6 +116,7 @@ export function addDays(dayKey: string, days: number): string {
   return shifted.toISOString().slice(0, 10);
 }
 
+/** Days from one key to another, counting both ends: a key to itself is 1. */
 export function daysBetween(fromKey: string, toKey: string): number {
   const [fy, fm, fd] = fromKey.split("-").map(Number);
   const [ty, tm, td] = toKey.split("-").map(Number);

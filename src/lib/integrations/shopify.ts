@@ -192,6 +192,7 @@ export type ShopifyOrder = {
   processedAt: string;
   displayFinancialStatus: string | null;
   shippingCountry: string | null;
+  customerId: string | null;
   currencyCode: string;
   paymentGatewayNames: string[];
   subtotal: number;
@@ -212,7 +213,13 @@ export type ShopifyOrder = {
   }[];
 };
 
-const ORDERS_QUERY = `
+/**
+ * Reading `customer` needs protected customer data approval, which a store may not have
+ * granted. The field is therefore optional: the sync asks for it, and drops it for the
+ * rest of the run if Shopify refuses, so revenue keeps syncing without new/returning
+ * customer analysis rather than failing outright.
+ */
+const ordersQuery = (withCustomer: boolean) => `
   query Orders($cursor: String, $query: String!) {
     orders(first: 50, after: $cursor, query: $query, sortKey: PROCESSED_AT) {
       pageInfo { hasNextPage endCursor }
@@ -224,6 +231,7 @@ const ORDERS_QUERY = `
         currencyCode
         paymentGatewayNames
         shippingAddress { countryCodeV2 }
+        ${withCustomer ? "customer { id }" : ""}
         currentSubtotalPriceSet { shopMoney { amount } }
         totalDiscountsSet { shopMoney { amount } }
         totalShippingPriceSet { shopMoney { amount } }
@@ -247,11 +255,56 @@ const ORDERS_QUERY = `
   }
 `;
 
+/** Whether Shopify refused a field for want of protected customer data access. */
+function isProtectedDataError(error: unknown): boolean {
+  if (!(error instanceof ShopifyError)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("protected customer data") ||
+    message.includes("not approved to access") ||
+    (message.includes("access denied") && message.includes("customer"))
+  );
+}
+
 type MoneySet = { shopMoney: { amount: string } } | null;
 
 function money(set: MoneySet): number {
   return set ? Number.parseFloat(set.shopMoney.amount) || 0 : 0;
 }
+
+type OrdersResponse = {
+  orders: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    nodes: {
+      id: string;
+      name: string;
+      processedAt: string;
+      displayFinancialStatus: string | null;
+      shippingAddress: { countryCodeV2: string | null } | null;
+      customer: { id: string } | null;
+      currencyCode: string;
+      paymentGatewayNames: string[];
+      currentSubtotalPriceSet: MoneySet;
+      totalDiscountsSet: MoneySet;
+      totalShippingPriceSet: MoneySet;
+      totalTaxSet: MoneySet;
+      totalPriceSet: MoneySet;
+      totalRefundedSet: MoneySet;
+      lineItems: {
+        nodes: {
+          id: string;
+          title: string;
+          sku: string | null;
+          quantity: number;
+          variantTitle: string | null;
+          variant: { id: string } | null;
+          originalUnitPriceSet: MoneySet;
+          totalDiscountSet: MoneySet;
+        }[];
+      };
+    }[];
+  };
+};
 
 /**
  * `updatedSince` filters on when Shopify last touched the order rather than when it
@@ -265,44 +318,29 @@ export async function fetchOrders(
 ): Promise<ShopifyOrder[]> {
   const orders: ShopifyOrder[] = [];
   let cursor: string | null = null;
+  let withCustomer = true;
   const filter = updatedSince
     ? `updated_at:>=${updatedSince.toISOString()}`
     : `processed_at:>=${since.toISOString()}`;
 
   // Shopify caps a single connection page at 250; 50 keeps us well inside the cost limit.
   for (let page = 0; page < 100; page += 1) {
-    const data: {
-      orders: {
-        pageInfo: { hasNextPage: boolean; endCursor: string | null };
-        nodes: {
-          id: string;
-          name: string;
-          processedAt: string;
-          displayFinancialStatus: string | null;
-          shippingAddress: { countryCodeV2: string | null } | null;
-          currencyCode: string;
-          paymentGatewayNames: string[];
-          currentSubtotalPriceSet: MoneySet;
-          totalDiscountsSet: MoneySet;
-          totalShippingPriceSet: MoneySet;
-          totalTaxSet: MoneySet;
-          totalPriceSet: MoneySet;
-          totalRefundedSet: MoneySet;
-          lineItems: {
-            nodes: {
-              id: string;
-              title: string;
-              sku: string | null;
-              quantity: number;
-              variantTitle: string | null;
-              variant: { id: string } | null;
-              originalUnitPriceSet: MoneySet;
-              totalDiscountSet: MoneySet;
-            }[];
-          };
-        }[];
-      };
-    } = await graphql(credentials, ORDERS_QUERY, { cursor, query: filter });
+    const data: OrdersResponse = await graphql<OrdersResponse>(
+      credentials,
+      ordersQuery(withCustomer),
+      { cursor, query: filter },
+    ).catch((error: unknown) => {
+      // Retried once and then remembered, so a store without the approval pays for one
+      // failed request rather than one per page.
+      if (withCustomer && isProtectedDataError(error)) {
+        withCustomer = false;
+        return graphql<OrdersResponse>(credentials, ordersQuery(false), {
+          cursor,
+          query: filter,
+        });
+      }
+      throw error;
+    });
 
     for (const node of data.orders.nodes) {
       orders.push({
@@ -311,6 +349,7 @@ export async function fetchOrders(
         processedAt: node.processedAt,
         displayFinancialStatus: node.displayFinancialStatus,
         shippingCountry: node.shippingAddress?.countryCodeV2 ?? null,
+        customerId: node.customer?.id ?? null,
         currencyCode: node.currencyCode,
         paymentGatewayNames: node.paymentGatewayNames ?? [],
         subtotal: money(node.currentSubtotalPriceSet),
@@ -436,4 +475,102 @@ export async function verifyCredentials(credentials: ShopifyCredentials) {
     `query { shop { name currencyCode } }`,
   );
   return data.shop;
+}
+
+/**
+ * Daily store sessions, the denominator of conversion rate.
+ *
+ * Sessions are analytics rather than commerce data, so they come from ShopifyQL
+ * instead of the orders API. That needs the `read_reports` scope, which a store may not
+ * have granted; `SessionsUnavailableError` distinguishes that from a real failure so
+ * the sync can report what to add rather than reading as broken.
+ */
+export class SessionsUnavailableError extends Error {}
+
+const SESSIONS_QUERY = `
+  query Sessions($query: String!) {
+    shopifyqlQuery(query: $query) {
+      __typename
+      ... on TableResponse {
+        tableData {
+          columns { name dataType displayName }
+          rowData
+        }
+      }
+      parseErrors { code message }
+    }
+  }
+`;
+
+export async function fetchDailySessions(
+  credentials: ShopifyCredentials,
+  since: Date,
+  until: Date,
+): Promise<{ day: string; sessions: number }[]> {
+  const from = since.toISOString().slice(0, 10);
+  const to = until.toISOString().slice(0, 10);
+  // Dates are pinned rather than relative so the window matches the sync's own range.
+  const ql = `FROM sessions SHOW sessions TIMESERIES day SINCE ${from} UNTIL ${to} ORDER BY day ASC`;
+
+  let data: {
+    shopifyqlQuery: {
+      __typename: string;
+      tableData?: {
+        columns: { name: string; dataType: string; displayName: string }[];
+        rowData: string[][];
+      } | null;
+      parseErrors?: { code: string; message: string }[] | null;
+    } | null;
+  };
+  try {
+    data = await graphql(credentials, SESSIONS_QUERY, { query: ql });
+  } catch (error) {
+    if (error instanceof ShopifyError && isReportsAccessError(error)) {
+      throw new SessionsUnavailableError(
+        "Shopify did not allow reading analytics. Add the read_reports scope to your app, release a new version and reinstall it, then sync sessions again.",
+      );
+    }
+    throw error;
+  }
+
+  const result = data.shopifyqlQuery;
+  if (!result) throw new SessionsUnavailableError("Shopify returned no analytics data.");
+  if (result.parseErrors?.length) {
+    throw new ShopifyError(
+      `analytics query rejected: ${result.parseErrors.map((e) => e.message).join("; ")}`,
+    );
+  }
+  const table = result.tableData;
+  if (!table) return [];
+
+  // Columns are addressed by name rather than position, which ShopifyQL does not promise.
+  const dayIndex = table.columns.findIndex((column) => column.name === "day");
+  const sessionsIndex = table.columns.findIndex((column) => column.name === "sessions");
+  if (dayIndex < 0 || sessionsIndex < 0) {
+    throw new ShopifyError(
+      `analytics response missing day/sessions columns (got ${table.columns.map((c) => c.name).join(", ")})`,
+    );
+  }
+
+  const rows: { day: string; sessions: number }[] = [];
+  for (const row of table.rowData ?? []) {
+    // ShopifyQL dates come back as "2026-08-30" or a full timestamp; keep the day.
+    const day = String(row[dayIndex] ?? "").slice(0, 10);
+    const sessions = Number.parseInt(String(row[sessionsIndex] ?? "0"), 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(sessions)) {
+      rows.push({ day, sessions });
+    }
+  }
+  return rows;
+}
+
+/** Whether Shopify refused the analytics query for want of the read_reports scope. */
+function isReportsAccessError(error: ShopifyError): boolean {
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("read_reports") ||
+    message.includes("access denied") ||
+    message.includes("not approved") ||
+    message.includes("required access")
+  );
 }

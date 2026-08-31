@@ -10,6 +10,7 @@ const SECTIONS = [
       { href: "/dashboard", label: "Dashboard", icon: "▦" },
       { href: "/dashboard/products", label: "Product analytics", icon: "▤" },
       { href: "/dashboard/orders", label: "Orders report", icon: "▥" },
+      { href: "/dashboard/conversion", label: "Conversion rate", icon: "◈" },
       { href: "/dashboard/ads", label: "Ad spend", icon: "◑" },
     ],
   },

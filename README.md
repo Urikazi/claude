@@ -13,6 +13,7 @@ reports what actually landed in your pocket.
 | Payment processing fees | Stripe balance transactions, PayPal transaction search |
 | Shopify transaction fee | Configurable, defaults to 0.6% |
 | COGS by quantity | Entered per variant, or imported as a supplier price list |
+| Sessions and conversion rate | Shopify analytics via ShopifyQL (`read_reports`) |
 
 The profit calculation:
 
@@ -80,10 +81,16 @@ database and are never sent anywhere except the provider they belong to.
 
 **Shopify** — Shopify has retired admin-created custom apps, so this uses the client credentials
 grant instead. In the [Dev Dashboard](https://dev.shopify.com), create an app with the
-`read_orders` and `read_products` scopes, release a version, and **install it on your store** —
+`read_orders`, `read_products` and `read_reports` scopes, release a version, and **install it on
+your store** —
 the grant only works against a store the app is installed on. Then open App settings →
 Credentials and copy the Client ID and a Secret into the settings page along with your
 `*.myshopify.com` domain. Access tokens are minted automatically and refreshed every 24 hours.
+
+`read_reports` is what allows sessions to be read, which conversion rate divides by; without it
+everything else still works and conversion falls back to ad clicks. Reading which customer placed
+an order — and so telling a first purchase from a repeat — additionally needs protected customer
+data access approved on the app. Without it, orders still sync and conversion is reported blended.
 
 Add `read_all_orders` only if you need order history older than 60 days; it requires separate
 approval from Shopify. Without it the API returns the last 60 days, which matches the default
@@ -131,6 +138,25 @@ For a supplier who quotes by destination, import a price list instead: it holds 
 country and quantity, and country-specific prices win over anything typed per product. Use
 **Re-apply costs to past orders** in settings to push changes onto history.
 
+## Conversion rate and the change log
+
+**Conversion rate** reports new customer orders per session, because a landing page or a creative
+is judged on strangers rather than on people who were coming back anyway. Blended and returning
+rates are shown beside it.
+
+Every edit you make — a price, a creative, a rewritten page — can be logged with the day it went
+live. Each one is marked on the chart and compared against an equal number of days either side,
+stopping at the next change so two edits are never mixed into one reading.
+
+The comparison reports whether a move is larger than the order counts alone would throw up by
+chance. That is not proof: a logged change is not a controlled experiment, and traffic mix, spend
+and season move conversion too. Treat "likely better" as worth a closer look, not as a result.
+
+Whether a customer is new is worked out from the earliest order held for them, not from Shopify's
+lifetime order count, which describes the customer today and would relabel past orders every time
+someone bought again. Customers whose first purchase predates your synced history therefore read
+as new.
+
 ## Automating the sync
 
 Point any scheduler at the sync endpoint:
@@ -140,7 +166,8 @@ curl -X POST https://your-app/api/sync
 curl -X POST "https://your-app/api/sync?source=meta&days=7"
 ```
 
-Sources are `shopify-products`, `shopify-orders`, `meta` and `fees`; omit `source` to run all four.
+Sources are `shopify-products`, `shopify-orders`, `shopify-sessions`, `meta` and `fees`; omit
+`source` to run all five.
 Set `SYNC_SECRET` in the environment and pass it as `Authorization: Bearer <token>` to lock the
 endpoint down. The route also accepts GET so schedulers that only issue GETs (Vercel Cron) work.
 

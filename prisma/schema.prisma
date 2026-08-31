@@ -16,11 +16,11 @@ model SupplierCostTier {
   storeId String
   store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
-  sku     String
+  sku       String
   /// ISO country code, or "*" for a price that applies everywhere.
-  country String
+  country   String
   /// Units in the order line.
-  quantity Int
+  quantity  Int
   /// Quoted total for that many units, all in.
   totalCost Float
 
@@ -71,6 +71,8 @@ model Store {
   adSpend   AdSpendEntry[]
   syncLogs  SyncLog[]
   costTiers SupplierCostTier[]
+  traffic   DailyTraffic[]
+  changes   StoreChange[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -127,7 +129,7 @@ model ProductVariant {
   price     Float   @default(0)
 
   /// Unit cost of goods, entered by the user.
-  cogs Float @default(0)
+  cogs         Float @default(0)
   /// Per-unit shipping/fulfilment cost, entered by the user.
   shippingCost Float @default(0)
   /// Per-unit handling/packaging cost, entered by the user.
@@ -150,10 +152,15 @@ model Order {
   name      String? // #1001
   currency  String  @default("USD")
 
-  processedAt DateTime
+  processedAt     DateTime
   financialStatus String? // paid, refunded, partially_refunded...
   /// ISO country of the shipping address; selects the supplier's price column.
   shippingCountry String?
+
+  /// Shopify customer this order belongs to. Whether the order is a first purchase is
+  /// derived from the earliest order per customer rather than read from Shopify, whose
+  /// lifetime order count reflects today rather than the moment of the order.
+  customerId String?
 
   /// Gross merchandise value before discounts.
   subtotal      Float @default(0)
@@ -165,15 +172,15 @@ model Order {
   refundedTotal Float @default(0)
 
   /// STRIPE | PAYPAL | SHOPIFY_PAYMENTS | OTHER
-  gateway     String @default("OTHER")
+  gateway     String  @default("OTHER")
   gatewayName String?
 
   /// Real processor fee pulled from Stripe/PayPal. Null until reconciled.
-  processorFeeActual Float?
+  processorFeeActual   Float?
   /// Estimated processor fee from FeeConfig, always populated.
-  processorFeeEstimate Float @default(0)
+  processorFeeEstimate Float  @default(0)
   /// Shopify transaction fee (0.6% by default).
-  shopifyFee Float @default(0)
+  shopifyFee           Float  @default(0)
 
   lineItems OrderLineItem[]
 
@@ -182,30 +189,31 @@ model Order {
 
   @@unique([storeId, shopifyId])
   @@index([storeId, processedAt])
+  @@index([storeId, customerId])
 }
 
 model OrderLineItem {
-  id        String  @id @default(cuid())
+  id        String          @id @default(cuid())
   orderId   String
-  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order     Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   variantId String?
   variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
 
-  shopifyId       String?
-  title           String
-  variantTitle    String?
-  sku             String?
-  quantity        Int     @default(1)
-  price           Float   @default(0)
-  discountAllocated Float @default(0)
+  shopifyId         String?
+  title             String
+  variantTitle      String?
+  sku               String?
+  quantity          Int     @default(1)
+  price             Float   @default(0)
+  discountAllocated Float   @default(0)
 
   /// COGS snapshot at sync time so historical PNL does not shift when costs are edited.
-  unitCogs     Float @default(0)
-  unitShipping Float @default(0)
-  unitHandling Float @default(0)
+  unitCogs     Float  @default(0)
+  unitShipping Float  @default(0)
+  unitHandling Float  @default(0)
   /// Total cost for the whole line, taken from the supplier's quantity tier. Set only
   /// when a tier matched; otherwise cost falls back to the per-unit fields above.
-  lineCost Float?
+  lineCost     Float?
 
   @@index([orderId])
   @@index([variantId])
@@ -243,9 +251,49 @@ model SyncLog {
   source    String // shopify | meta | stripe | paypal
   status    String // success | error
   message   String?
-  records   Int      @default(0)
-  startedAt DateTime @default(now())
+  records   Int       @default(0)
+  startedAt DateTime  @default(now())
   endedAt   DateTime?
 
   @@index([storeId, source, startedAt])
+}
+
+/// Daily store sessions, the denominator of conversion rate. Shopify reports these
+/// through ShopifyQL rather than the orders API, so they arrive in their own sync and
+/// may be absent — conversion falls back to ad clicks when they are.
+model DailyTraffic {
+  id      String @id @default(cuid())
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  /// UTC midnight of the store-local day, matching how ad spend is dated.
+  date     DateTime
+  sessions Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([storeId, date])
+  @@index([storeId, date])
+}
+
+/// An edit the operator made — a new creative, a price change, a rewritten landing
+/// page. Logged so a movement in conversion rate can be read against what was changed
+/// on the day it moved, instead of being guessed at afterwards.
+model StoreChange {
+  id      String @id @default(cuid())
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  /// UTC midnight of the store-local day the change went live.
+  date     DateTime
+  title    String
+  /// creative | price | landing_page | offer | product | other
+  category String   @default("other")
+  note     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([storeId, date])
 }

@@ -6,6 +6,7 @@ import {
   reconcileProcessorFees,
   syncMetaAds,
   syncShopifyOrders,
+  syncShopifySessions,
   syncShopifyProducts,
   type SyncResult,
 } from "@/lib/sync";
@@ -18,7 +19,13 @@ export const dynamic = "force-dynamic";
  */
 export const maxDuration = 300;
 
-const SOURCES = ["shopify-products", "shopify-orders", "meta", "fees"] as const;
+const SOURCES = [
+  "shopify-products",
+  "shopify-orders",
+  "shopify-sessions",
+  "meta",
+  "fees",
+] as const;
 type Source = (typeof SOURCES)[number];
 
 /**
@@ -51,6 +58,8 @@ async function run(source: Source, storeId: string, days: number): Promise<SyncR
       return syncShopifyProducts(storeId);
     case "shopify-orders":
       return syncShopifyOrders(storeId, days);
+    case "shopify-sessions":
+      return syncShopifySessions(storeId, days);
     case "meta":
       return syncMetaAds(storeId, days);
     case "fees":
