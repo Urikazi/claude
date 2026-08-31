@@ -10,7 +10,7 @@ import { DEFAULT_TIME_ZONE, isValidTimeZone } from "@/lib/timezone";
 import { parsePriceList, priceListToRows } from "@/lib/price-list";
 // Bundled at build time rather than read from disk, so it survives deployment to a
 // host that only ships the compiled output.
-import bundledPriceList from "../../data/veyla-price-list.json";
+import bundledPriceList from "../../data/derma-muse-price-list.json";
 import { ANY_COUNTRY } from "@/lib/cost-tiers";
 import {
   applyCostTiers,

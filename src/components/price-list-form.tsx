@@ -50,8 +50,9 @@ export function PriceListForm({
         <div className="mt-4 rounded-lg border border-accent/40 bg-accent/5 p-3">
           <p className="text-xs text-body">
             No prices loaded, so every order is costed at zero and profit is overstated.
-            Load the Veyla quote that ships with this dashboard — 252 prices across 5
-            products and 38 destinations, with anywhere unquoted falling back to US rates.
+            Load the Derma Muse price list that ships with this dashboard — 252 prices
+            across 5 products and 38 destinations, with anywhere unquoted falling back to
+            US rates.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button
@@ -60,7 +61,7 @@ export function PriceListForm({
               className={buttonClass}
               onClick={() => startBundled(async () => setBundledState(await importBundledPriceList(storeId)))}
             >
-              {bundledPending ? "Importing…" : "Load the Veyla price list"}
+              {bundledPending ? "Importing…" : "Load the Derma Muse price list"}
             </button>
             <button type="button" onClick={() => setOpen(true)} className={ghostButtonClass}>
               Paste my own instead
