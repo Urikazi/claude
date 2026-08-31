@@ -7,6 +7,9 @@ import { assertSession } from "@/lib/session";
 import { DEFAULT_FEE_CONFIG } from "@/lib/fees";
 import { parseSpendPaste } from "@/lib/ad-spend-paste";
 import { parsePriceList, priceListToRows } from "@/lib/price-list";
+// Bundled at build time rather than read from disk, so it survives deployment to a
+// host that only ships the compiled output.
+import bundledPriceList from "../../data/veyla-price-list.json";
 import { ANY_COUNTRY } from "@/lib/cost-tiers";
 import {
   applyCostTiers,
@@ -264,8 +267,11 @@ export async function importPriceList(
   await assertSession();
   const storeId = formData.get("storeId")?.toString();
   if (!storeId) return { ok: false, message: "Missing store." };
+  return applyPriceList(storeId, formData.get("priceList")?.toString() ?? "");
+}
 
-  const parsed = parsePriceList(formData.get("priceList")?.toString() ?? "");
+async function applyPriceList(storeId: string, raw: string): Promise<ActionState> {
+  const parsed = parsePriceList(raw);
   if (!parsed.ok) return { ok: false, message: parsed.message };
 
   const rows = priceListToRows(parsed.list);
@@ -510,4 +516,14 @@ export async function updateVariantCostTiers(
       ? `Saved ${entered.length} quantity price${entered.length === 1 ? "" : "s"}. Repriced ${priced} order lines.`
       : `Cleared quantity prices for ${sku}. Costs fall back to the per-unit fields.`,
   };
+}
+
+/**
+ * Imports the price list that ships with the app. Copying a JSON file out of the
+ * repository and pasting it into a textarea is a lot of ceremony for the one action
+ * that makes profit numbers real, and it is where setup stalls.
+ */
+export async function importBundledPriceList(storeId: string): Promise<ActionState> {
+  await assertSession();
+  return applyPriceList(storeId, JSON.stringify(bundledPriceList));
 }

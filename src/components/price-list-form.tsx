@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { importPriceList, type ActionState } from "@/lib/actions";
-import { Card, buttonClass, inputClass } from "@/components/ui";
+import { useActionState, useState, useTransition } from "react";
+import { importBundledPriceList, importPriceList, type ActionState } from "@/lib/actions";
+import { Card, buttonClass, ghostButtonClass, inputClass } from "@/components/ui";
 
 export type TierSummary = {
   sku: string;
@@ -22,7 +22,9 @@ export function PriceListForm({
     importPriceList,
     null,
   );
-  const [open, setOpen] = useState(summary.length === 0);
+  const [open, setOpen] = useState(false);
+  const [bundledPending, startBundled] = useTransition();
+  const [bundledState, setBundledState] = useState<ActionState>(null);
 
   return (
     <Card>
@@ -43,6 +45,34 @@ export function PriceListForm({
           {open ? "Hide" : summary.length ? "Replace list" : "Add list"}
         </button>
       </div>
+
+      {summary.length === 0 ? (
+        <div className="mt-4 rounded-lg border border-accent/40 bg-accent/5 p-3">
+          <p className="text-xs text-body">
+            No prices loaded, so every order is costed at zero and profit is overstated.
+            Load the Veyla quote that ships with this dashboard — 252 prices across 5
+            products and 38 destinations, with anywhere unquoted falling back to US rates.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={bundledPending}
+              className={buttonClass}
+              onClick={() => startBundled(async () => setBundledState(await importBundledPriceList(storeId)))}
+            >
+              {bundledPending ? "Importing…" : "Load the Veyla price list"}
+            </button>
+            <button type="button" onClick={() => setOpen(true)} className={ghostButtonClass}>
+              Paste my own instead
+            </button>
+            {bundledState ? (
+              <span className={`text-xs ${bundledState.ok ? "text-pos" : "text-neg"}`}>
+                {bundledState.message}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {summary.length > 0 ? (
         <div className="mt-4 overflow-x-auto">
