@@ -12,15 +12,18 @@ reports what actually landed in your pocket.
 | Ad spend, impressions, clicks | Meta Marketing API (campaign-level, daily) |
 | Payment processing fees | Stripe balance transactions, PayPal transaction search |
 | Shopify transaction fee | Configurable, defaults to 0.6% |
-| COGS, shipping, handling | Entered per variant in the dashboard |
+| COGS by quantity | Entered per variant, or imported as a supplier price list |
 
 The profit calculation:
 
 ```
 net revenue      = order total − refunds
-gross profit     = net revenue − COGS − shipping − handling − processing fees − Shopify fees
+gross profit     = net revenue − COGS − processing fees − Shopify fees
 net profit       = gross profit − ad spend
 ```
+
+COGS is looked up per order rather than multiplied per unit: a supplier quoting 6.59 for one and
+9.99 for two is charging for a parcel, not a rate.
 
 Fees start as estimates from your configured rates, then get replaced with the **real** amounts
 Stripe and PayPal charged once you run a fee sync. The Shopify 0.6% fee is applied to every order
@@ -102,21 +105,31 @@ Once saved, hit **Sync all**, or sync individual sources from the settings page.
 
 ## Entering COGS
 
-Go to **Products & COGS**. Each variant takes three numbers:
+Go to **Products & COGS**. Each variant takes a **cost per unit** — what one item costs you —
+and any number of **bundle costs**, each naming a quantity and what that many cost **in total**.
 
-- **COGS** — what the unit costs you
-- **Shipping** — per-unit fulfilment cost
-- **Handling** — per-unit packaging/pick-pack cost
+Fulfilment agents quote it this way because a parcel ships once: two units cost less than twice
+one. Entering 2 → 9.99 records the whole line at 9.99 rather than 2 × 6.59, which is the
+difference between a real profit figure and one that is several dollars light on every
+multi-unit order.
 
-Variants without a cost are sorted to the top of the list, and the overview page warns you while
-any remain — profit is overstated until they are filled in.
+Quantities between the ones you enter are interpolated. Past the largest bundle, cost
+extrapolates at that bundle's marginal rate — the cost of one more unit once shipping is already
+paid — rather than at the single-unit price.
 
-Costs are snapshotted onto each order line at sync time, so editing a cost today does not silently
-rewrite last quarter's reported profit. Saving a cost does push it onto that variant's existing
-line items; use **Re-apply costs to past orders** in settings to force a full refresh.
+Orders are costed as a whole, not line by line. A buy-one-get-one that arrives as two lines of
+one unit is priced as a single two-unit parcel, so offers and post-purchase upsells cost what the
+supplier actually charges however the storefront happens to record them.
 
-If you maintain unit costs in Shopify's own inventory screen, the product sync imports them
-automatically as a starting point and will not overwrite anything you have typed here.
+Variants whose SKU carries a suffix (`FL2600896-M`) fall back to the family SKU (`FL2600896`)
+when that is priced, since a shade or size rarely changes what the supplier charges.
+
+Variants without a cost sort to the top of the list, and the overview warns you while any
+remain — profit is overstated until they are filled in.
+
+For a supplier who quotes by destination, import a price list instead: it holds a table per SKU,
+country and quantity, and country-specific prices win over anything typed per product. Use
+**Re-apply costs to past orders** in settings to push changes onto history.
 
 ## Automating the sync
 
@@ -145,6 +158,8 @@ the **Ad spend** page and is included in net profit exactly like synced spend.
   roles; everyone who signs in sees and can change everything.
 - Rotating `SESSION_SECRET`, or clearing the `auth.session_secret` row, invalidates every existing
   session — that is how you sign out a lost device.
+- The dashboard reports in the store's own time zone, set in settings to match Shopify's, so a
+  day here is the same day there.
 - Provider credentials are stored in the database in plain text. Anyone with database access has
   them, so treat `DATABASE_URL` as being as sensitive as the API keys themselves.
 - Order-level profit on the Orders page excludes ad spend, which is only meaningful at the account
