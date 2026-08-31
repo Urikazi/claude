@@ -6,7 +6,7 @@ import {
   shopifyTransactionFee,
   toFeeRates,
 } from "@/lib/fees";
-import { buildTierTable, lookupLineCost, type TierTable } from "@/lib/cost-tiers";
+import { buildTierTable, costOrderLines, type TierTable } from "@/lib/cost-tiers";
 import * as shopify from "@/lib/integrations/shopify";
 import * as meta from "@/lib/integrations/meta-ads";
 import * as stripe from "@/lib/integrations/stripe";
@@ -217,11 +217,21 @@ export async function syncShopifyOrders(
     const orderIds = records.map((record) => record.id);
     await prisma.orderLineItem.deleteMany({ where: { orderId: { in: orderIds } } });
 
-    const lineItems = chunk.flatMap((order, index) =>
-      order.lineItems.map((item) => {
+    const lineItems = chunk.flatMap((order, index) => {
+      // Priced per parcel, so the order is costed once and split back over its lines.
+      const resolved = order.lineItems.map((item) => {
         const variant =
           (item.variantId ? byShopifyId.get(item.variantId) : undefined) ??
           (item.sku ? bySku.get(item.sku) : undefined);
+        return { item, variant, sku: item.sku ?? variant?.sku ?? null };
+      });
+      const lineCosts = costOrderLines(
+        tierTable,
+        order.shippingCountry,
+        resolved.map((r) => ({ sku: r.sku, quantity: r.item.quantity })),
+      );
+
+      return resolved.map(({ item, variant }, lineIndex) => {
         return {
           orderId: records[index].id,
           variantId: variant?.id ?? null,
@@ -235,15 +245,10 @@ export async function syncShopifyOrders(
           unitCogs: variant?.cogs ?? 0,
           unitShipping: variant?.shippingCost ?? 0,
           unitHandling: variant?.handlingCost ?? 0,
-          lineCost: lookupLineCost(
-            tierTable,
-            item.sku ?? variant?.sku ?? null,
-            order.shippingCountry,
-            item.quantity,
-          ),
+          lineCost: lineCosts[lineIndex],
         };
-      }),
-    );
+      });
+    });
     if (lineItems.length) await prisma.orderLineItem.createMany({ data: lineItems });
 
     count += chunk.length;
@@ -393,46 +398,53 @@ function matchByAmount(
   );
 }
 
-/// Re-applies current variant costs to line items, for orders already imported.
 /**
- * Recomputes the supplier-tier cost on every stored line item. Runs after a price
- * list is imported so existing orders pick up the new costs without re-syncing
- * everything from Shopify.
+ * Recomputes supplier-tier costs on stored orders, so an imported or edited price
+ * list applies to history without re-syncing from Shopify.
  *
- * Line items sharing a (sku, country, quantity) all resolve to the same total, so
- * they are updated as groups — a few dozen queries instead of one per line.
+ * Costing is per order, not per line: the supplier prices a parcel, and a
+ * buy-one-get-one arrives as two lines that ship together. Lines are then updated in
+ * groups sharing the same resulting cost, which keeps this to a few queries rather
+ * than one per line.
  */
 export async function applyCostTiers(storeId: string): Promise<number> {
   const table = await loadTierTable(storeId);
-  const items = await prisma.orderLineItem.findMany({
-    where: { order: { storeId } },
-    select: { id: true, sku: true, quantity: true, order: { select: { shippingCountry: true } } },
+  const orders = await prisma.order.findMany({
+    where: { storeId },
+    select: {
+      shippingCountry: true,
+      lineItems: { select: { id: true, sku: true, quantity: true } },
+    },
   });
 
-  const groups = new Map<string, { cost: number | null; ids: string[] }>();
-  for (const item of items) {
-    const country = item.order.shippingCountry;
-    const key = `${item.sku ?? ""}|${country ?? ""}|${item.quantity}`;
-    const group = groups.get(key);
-    if (group) {
-      group.ids.push(item.id);
-      continue;
-    }
-    const cost = lookupLineCost(table, item.sku, country, item.quantity);
-    groups.set(key, { cost: cost === null ? null : round2(cost), ids: [item.id] });
+  const byCost = new Map<number | null, string[]>();
+  for (const order of orders) {
+    const costs = costOrderLines(
+      table,
+      order.shippingCountry,
+      order.lineItems.map((item) => ({ sku: item.sku, quantity: item.quantity })),
+    );
+    order.lineItems.forEach((item, index) => {
+      byCost.set(costs[index], [...(byCost.get(costs[index]) ?? []), item.id]);
+    });
   }
 
   let updated = 0;
-  for (const { cost, ids } of groups.values()) {
-    const result = await prisma.orderLineItem.updateMany({
-      where: { id: { in: ids } },
-      data: { lineCost: cost },
-    });
-    if (cost !== null) updated += result.count;
+  for (const [cost, ids] of byCost) {
+    // Chunked so a store with a long tail of distinct costs cannot build a query
+    // with tens of thousands of ids in it.
+    for (let start = 0; start < ids.length; start += 1000) {
+      const result = await prisma.orderLineItem.updateMany({
+        where: { id: { in: ids.slice(start, start + 1000) } },
+        data: { lineCost: cost },
+      });
+      if (cost !== null) updated += result.count;
+    }
   }
   return updated;
 }
 
+/// Re-applies current variant costs to line items, for orders already imported.
 export async function recalculateCosts(storeId: string): Promise<number> {
   const variants = await prisma.productVariant.findMany({
     where: { product: { storeId } },

@@ -110,3 +110,65 @@ export function resolveTierSku(pricedSkus: Set<string>, sku: string | null): str
   if (!sku) return null;
   return skuCandidates(sku).find((candidate) => pricedSkus.has(candidate)) ?? null;
 }
+
+/**
+ * Which priced SKU a variant belongs to within a tier table — the key a whole order
+ * is grouped and costed under. Distinct from `resolveTierSku`, which answers the
+ * same question from a plain set of SKUs for display purposes.
+ */
+export function tierGroupKey(table: TierTable, sku: string | null): string | null {
+  if (!sku) return null;
+  return skuCandidates(sku).find((candidate) => table.has(candidate)) ?? null;
+}
+
+export type CostedLine = { sku: string | null; quantity: number };
+
+/**
+ * Costs a whole order rather than each line separately.
+ *
+ * A fulfilment quote prices a parcel: two sticks to the US cost 9.99 however they
+ * arrived in the basket. A buy-one-get-one adds a second line rather than raising
+ * the quantity, and pricing the lines apart would charge 6.59 twice — 3.19 too much
+ * on the store's most common order.
+ *
+ * Lines of the same product are grouped, priced once at their combined quantity,
+ * and the total split back over them by quantity so per-product reporting still
+ * adds up. Lines with no tier get null and fall back to per-unit costs.
+ */
+export function costOrderLines(
+  table: TierTable,
+  country: string | null,
+  lines: CostedLine[],
+): (number | null)[] {
+  const groups = new Map<string, number[]>();
+  lines.forEach((line, index) => {
+    const key = tierGroupKey(table, line.sku);
+    if (!key) return;
+    groups.set(key, [...(groups.get(key) ?? []), index]);
+  });
+
+  const costs: (number | null)[] = lines.map(() => null);
+  for (const [key, indexes] of groups) {
+    const totalQuantity = indexes.reduce((sum, i) => sum + lines[i].quantity, 0);
+    const total = lookupLineCost(table, key, country, totalQuantity);
+    if (total === null || totalQuantity <= 0) continue;
+
+    /**
+     * Rounded to whole cents here rather than by the caller, with the remainder put
+     * on the largest line. Splitting 9.99 evenly gives 4.995 twice, which rounds to
+     * 10.00 and quietly overstates the order — a cent that repeats across every
+     * buy-one-get-one.
+     */
+    const rounded = Math.round(total * 100);
+    let allocated = 0;
+    indexes.forEach((i, position) => {
+      const share =
+        position === indexes.length - 1
+          ? rounded - allocated
+          : Math.round((rounded * lines[i].quantity) / totalQuantity);
+      allocated += share;
+      costs[i] = share / 100;
+    });
+  }
+  return costs;
+}
