@@ -265,13 +265,22 @@ export async function syncShopifyOrders(
     : `Synced ${count} orders since ${since.toISOString().slice(0, 10)}.`;
   // Said outright rather than left to be guessed from orders that carry no customer,
   // which looks identical to a store that simply has none.
+  // Checked here rather than on the settings page so it is noticed: a wrong zone
+  // produces plausible numbers that are quietly for the wrong day.
+  const shopZone = await shopify.fetchShopTimeZone(credentials).catch(() => null);
+  const zoneWarning =
+    shopZone && shopZone !== store.timezone
+      ? ` Your Shopify store reports in ${shopZone} but this dashboard is set to ${store.timezone}, so daily figures are cut at a different midnight — change the time zone in settings to match.`
+      : "";
+
   const message = customerFieldAvailable
     ? base
     : `${base} Shopify would not say which customer placed each order, so new and returning cannot be separated — the app needs protected customer data access approved.${
         customerFieldRefusal ? ` Shopify said: ${customerFieldRefusal}` : ""
       }`;
-  await logSync(storeId, "shopify-orders", "success", message, count, startedAt);
-  return { source: "shopify-orders", records: count, message };
+  const finalMessage = `${message}${zoneWarning}`;
+  await logSync(storeId, "shopify-orders", "success", finalMessage, count, startedAt);
+  return { source: "shopify-orders", records: count, message: finalMessage };
 }
 
 export async function syncMetaAds(

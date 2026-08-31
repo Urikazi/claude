@@ -607,6 +607,23 @@ export function readSessionRows(
 }
 
 /**
+ * The store's own time zone, as Shopify keeps it.
+ *
+ * Day boundaries are drawn in this zone, so a mismatch with the configured one silently
+ * shifts every daily figure by the offset: orders in the first hours of the day land on
+ * the wrong side of midnight and "today" stops meaning what Shopify means by it.
+ */
+export async function fetchShopTimeZone(
+  credentials: ShopifyCredentials,
+): Promise<string | null> {
+  const data = await graphql<{ shop: { ianaTimezone: string | null } | null }>(
+    credentials,
+    `query ShopTimeZone { shop { ianaTimezone } }`,
+  );
+  return data.shop?.ianaTimezone ?? null;
+}
+
+/**
  * The scopes the installed app actually holds.
  *
  * A new app with the right boxes ticked still changes nothing until its credentials
