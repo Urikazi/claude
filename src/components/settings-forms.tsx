@@ -82,7 +82,7 @@ export function ConnectionsForm({ store }: { store: StoreSettings }) {
         </Field>
         <Field
           label="Time zone"
-          hint="Match your Shopify time zone, so a day here is the same day there."
+          hint="Taken from Shopify on every order sync, so a day here is the same day there. Anything set here is replaced the next time orders sync."
         >
           <select name="timezone" defaultValue={store.timezone} className={inputClass}>
             {TIME_ZONES.map((zone) => (

@@ -199,8 +199,10 @@ the **Ad spend** page and is included in net profit exactly like synced spend.
   roles; everyone who signs in sees and can change everything.
 - Rotating `SESSION_SECRET`, or clearing the `auth.session_secret` row, invalidates every existing
   session — that is how you sign out a lost device.
-- The dashboard reports in the store's own time zone, set in settings to match Shopify's, so a
-  day here is the same day there.
+- The dashboard reports in the store's own time zone, read from Shopify on every order sync, so a
+  day here is the same day there. A mismatch is invisible in the totals and shows up only as
+  missing revenue: a store reporting on UTC against a Paris shop drops every order placed in the
+  first hours of the day.
 - Provider credentials are stored in the database in plain text. Anyone with database access has
   them, so treat `DATABASE_URL` as being as sensitive as the API keys themselves.
 - Order-level profit on the Orders page excludes ad spend, which is only meaningful at the account

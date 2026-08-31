@@ -11,7 +11,7 @@ import * as shopify from "@/lib/integrations/shopify";
 import * as meta from "@/lib/integrations/meta-ads";
 import * as stripe from "@/lib/integrations/stripe";
 import * as paypal from "@/lib/integrations/paypal";
-import { safeTimeZone } from "@/lib/timezone";
+import { isValidTimeZone, safeTimeZone } from "@/lib/timezone";
 
 export type SyncResult = { source: string; records: number; message: string };
 
@@ -265,20 +265,32 @@ export async function syncShopifyOrders(
     : `Synced ${count} orders since ${since.toISOString().slice(0, 10)}.`;
   // Said outright rather than left to be guessed from orders that carry no customer,
   // which looks identical to a store that simply has none.
-  // Checked here rather than on the settings page so it is noticed: a wrong zone
-  // produces plausible numbers that are quietly for the wrong day.
+  /**
+   * The reporting zone is taken from Shopify rather than configured.
+   *
+   * Its only job is to make a day here the same day there, and a mismatch is invisible:
+   * the totals stay plausible while quietly covering a different window. A store on UTC
+   * reporting against Paris loses every order placed in the first two hours of the day,
+   * which reads as missing revenue rather than as a setting.
+   *
+   * Adopted on every sync, so it also follows a store that moves zones.
+   */
   const shopZone = await shopify.fetchShopTimeZone(credentials).catch(() => null);
-  const zoneWarning =
-    shopZone && shopZone !== store.timezone
-      ? ` Your Shopify store reports in ${shopZone} but this dashboard is set to ${store.timezone}, so daily figures are cut at a different midnight — change the time zone in settings to match.`
-      : "";
+  let zoneNote = "";
+  if (shopZone && shopZone !== store.timezone && isValidTimeZone(shopZone)) {
+    await prisma.store.update({
+      where: { id: storeId },
+      data: { timezone: shopZone },
+    });
+    zoneNote = ` Reporting time zone set to ${shopZone} to match Shopify, from ${store.timezone} — daily figures now cover the same day Shopify shows.`;
+  }
 
   const message = customerFieldAvailable
     ? base
     : `${base} Shopify would not say which customer placed each order, so new and returning cannot be separated — the app needs protected customer data access approved.${
         customerFieldRefusal ? ` Shopify said: ${customerFieldRefusal}` : ""
       }`;
-  const finalMessage = `${message}${zoneWarning}`;
+  const finalMessage = `${message}${zoneNote}`;
   await logSync(storeId, "shopify-orders", "success", finalMessage, count, startedAt);
   return { source: "shopify-orders", records: count, message: finalMessage };
 }
