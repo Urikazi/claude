@@ -115,6 +115,10 @@ on it. Uncheck live mode in settings to use sandbox credentials.
 
 Once saved, hit **Sync all**, or sync individual sources from the settings page.
 
+Ordinary syncs only fetch what Shopify has touched since the last one. After granting a new scope,
+use **Re-import every order in the window** in settings: orders already stored have not changed, so
+an incremental sync skips them and the newly permitted field never arrives on your history.
+
 ## Entering COGS
 
 Go to **Products & COGS**. Each variant takes a **cost per unit** — what one item costs you —

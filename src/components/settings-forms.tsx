@@ -397,6 +397,26 @@ export function SyncPanel({ storeId }: { storeId: string }) {
           Re-apply costs to past orders
         </button>
       </div>
+
+      {/* A normal sync only fetches what Shopify has touched since the last one, which is
+          what keeps a daily refresh quick. After granting a scope, that skips every order
+          already stored — they have not changed, so the new field never arrives. */}
+      <div className="mt-4 border-t border-line pt-4">
+        <button
+          type="button"
+          disabled={pending}
+          className={ghostButtonClass}
+          onClick={() => trigger(() => runSync(storeId, "shopify-orders", days, true))}
+        >
+          Re-import every order in the window
+        </button>
+        <p className="mt-2 max-w-xl text-xs text-muted">
+          Fetches the last {days} days again from scratch rather than only what changed. Use it
+          after granting a new scope — <code>read_customers</code>, say — so orders already
+          stored pick up the new field. Slower, and worth setting the look-back above to cover
+          the history you want first.
+        </p>
+      </div>
       {pending && <p className="mt-3 text-xs text-muted">Running…</p>}
       {!pending && state && (
         <p className={`mt-3 whitespace-pre-wrap text-xs ${state.ok ? "text-pos" : "text-neg"}`}>
