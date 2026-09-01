@@ -12,12 +12,14 @@ import { parsePriceList, priceListToRows } from "@/lib/price-list";
 // host that only ships the compiled output.
 import bundledPriceList from "../../data/derma-muse-price-list.json";
 import { ANY_COUNTRY } from "@/lib/cost-tiers";
+import { auditInvoice, parseInvoice, InvoiceFormatError } from "@/lib/invoice-audit";
 import { CHANGE_CATEGORIES } from "@/lib/change-categories";
 import {
   applyCostTiers,
   recalculateCosts,
   recalculateFees,
   reconcileProcessorFees,
+  loadTierTable,
   syncMetaAds,
   syncShopifySessions,
   syncShopifyOrders,
@@ -617,4 +619,98 @@ export async function deleteStoreChange(
   await prisma.storeChange.delete({ where: { id } }).catch(() => null);
   revalidatePath("/dashboard/conversion");
   return { ok: true, message: "Change removed." };
+}
+
+/**
+ * Checks a supplier's daily invoice against the agreed price list and keeps the result.
+ *
+ * The file is read here rather than in the browser so the price list never leaves the
+ * server, and so the check cannot be talked out of a verdict by whatever the page was
+ * showing at the time.
+ */
+export async function auditSupplierInvoice(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const storeId = formData.get("storeId")?.toString();
+  const file = formData.get("invoice");
+  if (!storeId) return { ok: false, message: "Missing store." };
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, message: "Choose the invoice file your supplier sent." };
+  }
+  if (file.size > 8_000_000) {
+    return { ok: false, message: "That file is over 8 MB. Upload a single day's invoice." };
+  }
+
+  let audit;
+  try {
+    audit = auditInvoice(await loadTierTable(storeId), parseInvoice(await file.text()));
+  } catch (error) {
+    if (error instanceof InvoiceFormatError) return { ok: false, message: error.message };
+    throw error;
+  }
+
+  if (!audit.lines.length) {
+    return { ok: false, message: "No billed lines found in that file." };
+  }
+
+  const dates = audit.lines.map((line) => line.date).filter(Boolean).sort();
+  const invoiceDate = dates.length ? new Date(`${dates[0]}T00:00:00.000Z`) : null;
+
+  await prisma.supplierInvoice.create({
+    data: {
+      storeId,
+      filename: file.name || "invoice.csv",
+      invoiceDate,
+      lineCount: audit.lines.length,
+      billedLines: audit.billedLines,
+      totalCharged: audit.totalCharged,
+      totalExpected: audit.totalExpected,
+      variance: audit.variance,
+      overchargedCount: audit.overcharged.length,
+      underchargedCount: audit.undercharged.length,
+      unquotedCount: audit.noCountryQuote.length + audit.unpriced.length,
+      statedTotal: audit.statedTotal,
+      lineSum: audit.lineSum,
+      lines: {
+        createMany: {
+          data: audit.lines.map((line) => ({
+            orderRef: line.orderRef,
+            date: line.date,
+            country: line.country,
+            product: line.product,
+            sku: line.billedSku,
+            quantity: line.billedQuantity,
+            charged: line.charged,
+            expected: line.expected,
+            variance: line.variance,
+            verdict: line.verdict,
+          })),
+        },
+      },
+    },
+  });
+
+  revalidatePath("/dashboard/invoices");
+  const summary =
+    audit.overcharged.length > 0
+      ? `Checked ${audit.billedLines} billed lines — ${audit.overcharged.length} charged above the price list, ${formatVariance(audit.variance)} in total.`
+      : `Checked ${audit.billedLines} billed lines — every one matches the price list.`;
+  return { ok: true, message: summary };
+}
+
+const formatVariance = (value: number) =>
+  `${value >= 0 ? "+" : "−"}$${Math.abs(value).toFixed(2)}`;
+
+export async function deleteSupplierInvoice(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const id = formData.get("id")?.toString();
+  if (!id) return { ok: false, message: "Missing invoice." };
+  await prisma.supplierInvoice.delete({ where: { id } }).catch(() => null);
+  revalidatePath("/dashboard/invoices");
+  return { ok: true, message: "Invoice removed." };
 }

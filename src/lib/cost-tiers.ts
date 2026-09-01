@@ -116,6 +116,31 @@ export function resolveTierSku(pricedSkus: Set<string>, sku: string | null): str
  * is grouped and costed under. Distinct from `resolveTierSku`, which answers the
  * same question from a plain set of SKUs for display purposes.
  */
+/**
+ * Whether the price found for a line is a quote for that destination, or a stand-in.
+ *
+ * A SKU priced only under the catch-all is a deliberate flat rate — the sponge costs the
+ * same wherever it goes — and checking an invoice against it is exactly right. A SKU
+ * priced country by country that says nothing about this one is a gap, and comparing it
+ * against some other country's price would report a discrepancy nobody agreed to.
+ */
+export function isQuotedFor(
+  table: TierTable,
+  sku: string | null,
+  country: string | null,
+): boolean {
+  if (!sku) return false;
+  for (const candidate of skuCandidates(sku)) {
+    const byCountry = table.get(candidate);
+    if (!byCountry?.size) continue;
+    if (country && byCountry.get(country.toUpperCase())?.length) return true;
+    // Only the catch-all: a flat rate, which is the quote.
+    const countriesQuoted = [...byCountry.keys()].filter((key) => key !== ANY_COUNTRY);
+    return countriesQuoted.length === 0 && Boolean(byCountry.get(ANY_COUNTRY)?.length);
+  }
+  return false;
+}
+
 export function tierGroupKey(table: TierTable, sku: string | null): string | null {
   if (!sku) return null;
   return skuCandidates(sku).find((candidate) => table.has(candidate)) ?? null;

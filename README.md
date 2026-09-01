@@ -195,6 +195,26 @@ as new, and so do those whose earlier orders were synced before `read_customers`
 nothing links an unattributed order to its buyer. The page counts those orders and says so, since
 both cases undercount returning customers rather than failing visibly.
 
+## Checking supplier invoices
+
+Upload the daily order export your supplier bills from, at **Supplier invoices**, and every line is
+priced against the list you imported. What matches is not shown; what does not is listed with the
+billed amount, the quoted one and the difference.
+
+A line is checked only where the price list quotes that SKU for that destination. A product quoted
+at one rate everywhere is checked wherever it ships; one quoted country by country is left alone in
+a country the list says nothing about, because the only comparison available there is against a
+price nobody agreed for it — and reporting that as an overcharge would make every unquoted country
+look like a dispute.
+
+The free half of a two-for-one arrives as a line billed for zero units, so its expected cost is
+zero: an amount against it is an overcharge, not a discount lost. The invoice's own stated total is
+checked against the sum of its lines as well, since the two disagreeing is worth knowing before any
+individual price is.
+
+Invoices are kept, so a rate creeping up shows across weeks rather than having to be caught on the
+day.
+
 ## Automating the sync
 
 Point any scheduler at the sync endpoint:

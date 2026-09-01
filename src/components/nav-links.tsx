@@ -12,6 +12,7 @@ const SECTIONS = [
       { href: "/dashboard/orders", label: "Orders report", icon: "▥" },
       { href: "/dashboard/conversion", label: "Conversion rate", icon: "◈" },
       { href: "/dashboard/ads", label: "Ad spend", icon: "◑" },
+      { href: "/dashboard/invoices", label: "Supplier invoices", icon: "▧" },
     ],
   },
   {

@@ -56,8 +56,8 @@ model Store {
   shopifyAccessToken  String?
 
   // Meta Ads
-  metaAdAccountId String? // e.g. act_123456789
-  metaAccessToken String?
+  metaAdAccountId             String? // e.g. act_123456789
+  metaAccessToken             String?
   /// Whether the conversion the ad account optimises for already excludes repeat buyers.
   /// A store tracking new customer purchases only gets a platform ROAS that is already a
   /// new customer figure, and labelling it as covering everyone would misread it.
@@ -81,6 +81,7 @@ model Store {
   costTiers SupplierCostTier[]
   traffic   DailyTraffic[]
   changes   StoreChange[]
+  invoices  SupplierInvoice[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -238,11 +239,11 @@ model AdSpendEntry {
   campaignId   String  @default("")
   campaignName String?
 
-  spend       Float @default(0)
-  impressions Int   @default(0)
-  clicks      Int   @default(0)
+  spend           Float @default(0)
+  impressions     Int   @default(0)
+  clicks          Int   @default(0)
   /// Purchases attributed by the platform - used for ROAS sanity checks, not for revenue.
-  conversions Int   @default(0)
+  conversions     Int   @default(0)
   /// Purchase value as the platform attributes it, which is what its own ROAS divides by
   /// spend. Kept apart from Shopify revenue: the two count different things and only the
   /// platform's own figure will match what its reporting shows.
@@ -308,4 +309,58 @@ model StoreChange {
   updatedAt DateTime @updatedAt
 
   @@index([storeId, date])
+}
+
+/// A supplier's daily billing, checked against the agreed price list.
+///
+/// Kept rather than checked and discarded: a price that creeps up shows itself across
+/// weeks, not on any one day, and an invoice already paid is the only record of what was
+/// agreed at the time.
+model SupplierInvoice {
+  id      String @id @default(cuid())
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  filename    String
+  /// Earliest line date in the file, which is the day it bills for.
+  invoiceDate DateTime?
+  uploadedAt  DateTime  @default(now())
+
+  lineCount         Int
+  billedLines       Int
+  /// Charged and expected across lines the price list actually covers.
+  totalCharged      Float
+  totalExpected     Float
+  variance          Float
+  overchargedCount  Int    @default(0)
+  underchargedCount Int    @default(0)
+  unquotedCount     Int    @default(0)
+  /// The invoice's own stated total, and what its lines add up to including tax.
+  statedTotal       Float?
+  lineSum           Float  @default(0)
+
+  lines SupplierInvoiceLine[]
+
+  @@index([storeId, uploadedAt])
+}
+
+model SupplierInvoiceLine {
+  id        String          @id @default(cuid())
+  invoiceId String
+  invoice   SupplierInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  orderRef String
+  date     String
+  country  String
+  product  String
+  sku      String
+  quantity Int
+  charged  Float
+  /// Null where the price list has nothing to compare against.
+  expected Float?
+  variance Float
+  /// ok | overcharged | undercharged | unpriced | no-country-quote
+  verdict  String
+
+  @@index([invoiceId, verdict])
 }
