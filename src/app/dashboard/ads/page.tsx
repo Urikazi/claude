@@ -80,7 +80,7 @@ export default async function AdsPage({
           hint={
             ncRoas.available
               ? ncRoas.source === "meta"
-                ? "As Meta reports it"
+                ? `${formatMoney(totals.platformConversionValue, currency)} attributed by Meta`
                 : "New customer revenue ÷ ad spend"
               : "Needs customer data on orders"
           }
@@ -103,7 +103,7 @@ export default async function AdsPage({
           hint={
             ncCost.available
               ? ncCost.source === "meta"
-                ? "As Meta reports it"
+                ? `${formatNumber(totals.platformConversions)} new customers, by Meta`
                 : `${formatNumber(totals.newCustomerOrders)} first orders`
               : "Needs customer data on orders"
           }
@@ -115,13 +115,18 @@ export default async function AdsPage({
         />
       </div>
 
-      <Card title="As Meta reports it">
-        <PlatformReported
-          totals={totals}
-          currency={currency}
-          newCustomersOnly={store.metaReportsNewCustomersOnly}
-        />
-      </Card>
+      {/* Only when the tiles above are not already showing these numbers — otherwise the
+          card repeats them, and a figure printed twice invites a search for the difference
+          between two copies of the same thing. */}
+      {ncRoas.source === "meta" && ncCost.source === "meta" ? null : (
+        <Card title="As Meta reports it">
+          <PlatformReported
+            totals={totals}
+            currency={currency}
+            newCustomersOnly={store.metaReportsNewCustomersOnly}
+          />
+        </Card>
+      )}
 
       <Card title="New customers only, against all orders">
         <NewCustomerPanel
