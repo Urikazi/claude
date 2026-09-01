@@ -22,6 +22,15 @@ export type PnlTotals = {
   processorFees: number;
   shopifyFees: number;
   adSpend: number;
+  /**
+   * Purchases and purchase value as the ad platform attributes them.
+   *
+   * Kept separate from Shopify's orders and revenue on purpose: the platform counts a
+   * sale when its own attribution claims one, over its own window, so the two will not
+   * agree. These are what its reporting shows, reproduced rather than recomputed.
+   */
+  platformConversions: number;
+  platformConversionValue: number;
   /** Orders that were the buyer's first, and what they brought in. */
   newCustomerOrders: number;
   newCustomerRevenue: number;
@@ -42,6 +51,12 @@ export type PnlTotals = {
   cpa: number;
   /** Ad spend per new customer acquired — what a first purchase actually costs. */
   cac: number;
+  /** What a first purchase is worth, which is what CAC has to be paid back out of. */
+  newCustomerAov: number;
+  /** ROAS as the ad platform reports it: its attributed value over its spend. */
+  platformRoas: number;
+  /** Cost per purchase as the ad platform reports it: its spend over its purchases. */
+  platformCostPerPurchase: number;
 };
 
 export type PnlDaily = PnlTotals & { date: string };
@@ -53,7 +68,19 @@ export type PnlReport = {
   feesBreakdown: { gateway: string; orders: number; fees: number }[];
 };
 
-const EMPTY: Omit<PnlTotals, "margin" | "roas" | "ncRoas" | "poas" | "aov" | "cpa" | "cac"> = {
+const EMPTY: Omit<
+  PnlTotals,
+  | "margin"
+  | "roas"
+  | "ncRoas"
+  | "poas"
+  | "aov"
+  | "cpa"
+  | "cac"
+  | "newCustomerAov"
+  | "platformRoas"
+  | "platformCostPerPurchase"
+> = {
   orders: 0,
   units: 0,
   grossRevenue: 0,
@@ -68,6 +95,8 @@ const EMPTY: Omit<PnlTotals, "margin" | "roas" | "ncRoas" | "poas" | "aov" | "cp
   processorFees: 0,
   shopifyFees: 0,
   adSpend: 0,
+  platformConversions: 0,
+  platformConversionValue: 0,
   newCustomerOrders: 0,
   newCustomerRevenue: 0,
   customersKnown: false,
@@ -124,6 +153,17 @@ function finalize(base: typeof EMPTY): PnlTotals {
     cac:
       base.newCustomerOrders > 0 && base.customersKnown
         ? round2(base.adSpend / base.newCustomerOrders)
+        : 0,
+    newCustomerAov:
+      base.newCustomerOrders > 0 && base.customersKnown
+        ? round2(base.newCustomerRevenue / base.newCustomerOrders)
+        : 0,
+    // Summed first, divided second: a ratio of totals, never an average of ratios.
+    platformRoas:
+      base.adSpend > 0 ? round2(base.platformConversionValue / base.adSpend) : 0,
+    platformCostPerPurchase:
+      base.platformConversions > 0
+        ? round2(base.adSpend / base.platformConversions)
         : 0,
   };
 }
@@ -221,8 +261,12 @@ export async function buildPnlReport(
 
   const spendByPlatform = new Map<string, number>();
   for (const entry of adSpend) {
-    totals.adSpend += entry.spend;
-    bucket(adSpendDayKey(entry.date)).adSpend += entry.spend;
+    const day = bucket(adSpendDayKey(entry.date));
+    for (const target of [totals, day]) {
+      target.adSpend += entry.spend;
+      target.platformConversions += entry.conversions;
+      target.platformConversionValue += entry.conversionValue;
+    }
     spendByPlatform.set(
       entry.platform,
       (spendByPlatform.get(entry.platform) ?? 0) + entry.spend,

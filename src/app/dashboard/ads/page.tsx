@@ -5,6 +5,8 @@ import { formatDate, formatMoney, formatNumber, resolveRange } from "@/lib/forma
 import { round2 } from "@/lib/fees";
 import { Card, Empty, Stat, Td, Th } from "@/components/ui";
 import { RangePicker } from "@/components/range-picker";
+import { NewCustomerPanel } from "@/components/new-customer-panel";
+import { PlatformReported } from "@/components/platform-reported";
 import { ManualAdSpendForm } from "@/components/manual-ad-spend-form";
 import { AdSpendPasteForm } from "@/components/ad-spend-paste-form";
 import { DedupeSpendButton } from "@/components/dedupe-spend-button";
@@ -110,6 +112,14 @@ export default async function AdsPage({
           hint={`${formatNumber(totals.orders)} orders, new and repeat`}
         />
       </div>
+
+      <Card title="As Meta reports it">
+        <PlatformReported totals={totals} currency={currency} />
+      </Card>
+
+      <Card title="New customers only, against all orders">
+        <NewCustomerPanel totals={totals} currency={currency} />
+      </Card>
 
       <Card title="Spend by platform">
         {report.adSpendByPlatform.length === 0 ? (

@@ -20,6 +20,12 @@ discounts and returns, plus shipping and tax — and broken out on the overview 
 reconciled against Shopify line by line. Anything the named rows do not cover, such as duties or
 tips, appears as its own row rather than being folded silently into another.
 
+The Ad spend page also reproduces **Meta's own figures** — Purchase ROAS and cost per purchase,
+exactly as Ads Manager shows them. Meta counts a sale when its attribution claims one, over its own
+window, so those numbers will not agree with the Shopify-derived ones beside them and are not meant
+to. Attributed value is stored per day and divided at the end, never averaged: a ratio of totals,
+not a mean of ratios.
+
 Return on ad spend is reported as **nc-ROAS** — new customer revenue over ad spend — alongside the
 blended figure. Ads buy first purchases; blended ROAS credits them with repeat orders that would
 have come anyway, so it reads high on a store with returning customers and moves for reasons the

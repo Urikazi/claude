@@ -25,6 +25,12 @@ export type MetaDailySpend = {
   impressions: number;
   clicks: number;
   conversions: number;
+  /**
+   * Purchase value as Meta attributes it. Stored rather than the ROAS ratio Meta also
+   * returns, because ratios cannot be added: a day's ROAS is the day's value over the
+   * day's spend, not the average of its campaigns'.
+   */
+  conversionValue: number;
 };
 
 type InsightRow = {
@@ -35,6 +41,8 @@ type InsightRow = {
   impressions?: string;
   clicks?: string;
   actions?: { action_type: string; value: string }[];
+  action_values?: { action_type: string; value: string }[];
+  purchase_roas?: { action_type: string; value: string }[];
 };
 
 class MetaError extends Error {
@@ -65,6 +73,30 @@ function purchaseCount(actions?: InsightRow["actions"]): number {
   return 0;
 }
 
+/**
+ * The purchase value Meta attributes to the campaign.
+ *
+ * Taken from `action_values` where present, and otherwise reconstructed from the ROAS
+ * Meta reports times the spend — the same quantity, and the only one available when an
+ * account returns one field and not the other.
+ */
+export function purchaseValue(row: InsightRow): number {
+  for (const entry of row.action_values ?? []) {
+    if (PURCHASE_ACTIONS.has(entry.action_type)) {
+      const value = Number.parseFloat(entry.value);
+      if (Number.isFinite(value)) return value;
+    }
+  }
+  for (const entry of row.purchase_roas ?? []) {
+    if (PURCHASE_ACTIONS.has(entry.action_type)) {
+      const roas = Number.parseFloat(entry.value);
+      const spend = Number.parseFloat(row.spend ?? "0");
+      if (Number.isFinite(roas) && Number.isFinite(spend)) return roas * spend;
+    }
+  }
+  return 0;
+}
+
 export async function fetchDailySpend(
   credentials: MetaCredentials,
   since: Date,
@@ -76,7 +108,8 @@ export async function fetchDailySpend(
     level: "campaign",
     time_increment: "1",
     limit: "500",
-    fields: "campaign_id,campaign_name,spend,impressions,clicks,actions",
+    fields:
+      "campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,purchase_roas",
     time_range: JSON.stringify({
       since: since.toISOString().slice(0, 10),
       until: until.toISOString().slice(0, 10),
@@ -108,6 +141,7 @@ export async function fetchDailySpend(
         impressions: Number.parseInt(row.impressions ?? "0", 10) || 0,
         clicks: Number.parseInt(row.clicks ?? "0", 10) || 0,
         conversions: purchaseCount(row.actions),
+        conversionValue: purchaseValue(row),
       });
     }
 

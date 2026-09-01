@@ -235,6 +235,10 @@ model AdSpendEntry {
   clicks      Int   @default(0)
   /// Purchases attributed by the platform - used for ROAS sanity checks, not for revenue.
   conversions Int   @default(0)
+  /// Purchase value as the platform attributes it, which is what its own ROAS divides by
+  /// spend. Kept apart from Shopify revenue: the two count different things and only the
+  /// platform's own figure will match what its reporting shows.
+  conversionValue Float @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -329,6 +329,7 @@ export async function syncMetaAds(
           impressions: row.impressions,
           clicks: row.clicks,
           conversions: row.conversions,
+          conversionValue: row.conversionValue,
         };
         return prisma.adSpendEntry.upsert({
           where: {
