@@ -135,24 +135,12 @@ export default async function OverviewPage({
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
           label="Total sales"
           value={formatMoney(totals.netRevenue, currency)}
           change={change(totals.netRevenue, prior.netRevenue)}
           hint={`AOV ${formatMoney(totals.aov, currency)} · same basis as Shopify`}
-        />
-        <Stat
-          label="Ad spend"
-          value={formatMoney(totals.adSpend, currency)}
-          change={change(totals.adSpend, prior.adSpend)}
-          // Spending more is not itself bad, but on this page it is a cost line.
-          higherIsBetter={false}
-          hint={
-            ncRoas.available
-              ? `nc-ROAS ${ncRoas.value.toFixed(2)}x · CAC ${formatMoney(ncCost.value, currency)}`
-              : `ROAS ${totals.roas.toFixed(2)}x · CPA ${formatMoney(totals.cpa, currency)}`
-          }
         />
         <Stat
           label="COGS"
@@ -181,6 +169,44 @@ export default async function OverviewPage({
           value={formatMoney(totals.grossProfit, currency)}
           change={change(totals.grossProfit, prior.grossProfit)}
           hint="Before ad spend"
+        />
+      </div>
+
+      {/* What acquisition cost and returned, kept together: the spend on its own says
+          nothing without what it bought, and each was previously a hint on the other. */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat
+          label="Total spend"
+          value={formatMoney(totals.adSpend, currency)}
+          change={change(totals.adSpend, prior.adSpend)}
+          // Spending more is not itself bad, but on this page it is a cost line.
+          higherIsBetter={false}
+          hint="Across every ad platform"
+        />
+        <Stat
+          label="nc-ROAS"
+          value={ncRoas.available ? `${ncRoas.value.toFixed(2)}x` : "—"}
+          change={ncRoas.available ? change(ncRoas.value, priorNcRoas.value) : undefined}
+          tone={ncRoas.available ? (ncRoas.value >= 1 ? "positive" : "negative") : "neutral"}
+          hint={
+            ncRoas.available
+              ? ncRoas.source === "meta"
+                ? `${formatMoney(totals.platformConversionValue, currency)} attributed by Meta`
+                : "New customer revenue ÷ ad spend"
+              : "Needs customer data on orders"
+          }
+        />
+        <Stat
+          label="Cost per new customer"
+          value={ncCost.available ? formatMoney(ncCost.value, currency) : "—"}
+          higherIsBetter={false}
+          hint={
+            ncCost.available
+              ? ncCost.source === "meta"
+                ? `${formatNumber(totals.platformConversions)} new customers, by Meta`
+                : `${formatNumber(totals.newCustomerOrders)} first orders`
+              : "Needs customer data on orders"
+          }
         />
       </div>
 
