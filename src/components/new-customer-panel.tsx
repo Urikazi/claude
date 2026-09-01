@@ -13,9 +13,12 @@ import { Td, Th } from "@/components/ui";
 export function NewCustomerPanel({
   totals,
   currency,
+  ncRoas,
 }: {
   totals: PnlTotals;
   currency: string;
+  /** Resolved once by the page so every place this number appears agrees. */
+  ncRoas: { value: number; source: "meta" | "shopify"; available: boolean };
 }) {
   if (!totals.customersKnown) {
     return (
@@ -55,9 +58,12 @@ export function NewCustomerPanel({
     },
     {
       label: "Return on ad spend",
-      nc: `${totals.ncRoas.toFixed(2)}x`,
+      nc: ncRoas.available ? `${ncRoas.value.toFixed(2)}x` : "—",
       all: `${totals.roas.toFixed(2)}x`,
-      hint: "Shopify revenue ÷ ad spend",
+      hint:
+        ncRoas.source === "meta"
+          ? "New customer figure from Meta; all orders from Shopify"
+          : "Shopify revenue ÷ ad spend",
     },
   ];
 

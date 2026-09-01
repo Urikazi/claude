@@ -31,6 +31,13 @@ export type PnlTotals = {
    */
   platformConversions: number;
   platformConversionValue: number;
+  /**
+   * Spend the platform itself reported, excluding rows entered by hand.
+   *
+   * The platform's own ratios divide by its own spend, so a pasted TikTok day would
+   * otherwise drag Meta's ROAS down without contributing any value to it.
+   */
+  platformSpend: number;
   /** Orders that were the buyer's first, and what they brought in. */
   newCustomerOrders: number;
   newCustomerRevenue: number;
@@ -97,6 +104,7 @@ const EMPTY: Omit<
   adSpend: 0,
   platformConversions: 0,
   platformConversionValue: 0,
+  platformSpend: 0,
   newCustomerOrders: 0,
   newCustomerRevenue: 0,
   customersKnown: false,
@@ -160,10 +168,12 @@ function finalize(base: typeof EMPTY): PnlTotals {
         : 0,
     // Summed first, divided second: a ratio of totals, never an average of ratios.
     platformRoas:
-      base.adSpend > 0 ? round2(base.platformConversionValue / base.adSpend) : 0,
+      base.platformSpend > 0
+        ? round2(base.platformConversionValue / base.platformSpend)
+        : 0,
     platformCostPerPurchase:
       base.platformConversions > 0
-        ? round2(base.adSpend / base.platformConversions)
+        ? round2(base.platformSpend / base.platformConversions)
         : 0,
   };
 }
@@ -262,10 +272,13 @@ export async function buildPnlReport(
   const spendByPlatform = new Map<string, number>();
   for (const entry of adSpend) {
     const day = bucket(adSpendDayKey(entry.date));
+    // Rows the operator typed or pasted carry no attribution of their own.
+    const fromPlatform = !entry.campaignId.startsWith("manual:");
     for (const target of [totals, day]) {
       target.adSpend += entry.spend;
       target.platformConversions += entry.conversions;
       target.platformConversionValue += entry.conversionValue;
+      if (fromPlatform) target.platformSpend += entry.spend;
     }
     spendByPlatform.set(
       entry.platform,
@@ -418,4 +431,27 @@ export async function countUncostedVariants(storeId: string): Promise<number> {
   ]);
   const pricedSkus = new Set(priced.map((tier) => tier.sku));
   return variants.filter((variant) => !isVariantCosted(pricedSkus, variant)).length;
+}
+
+/**
+ * The new customer ROAS to show.
+ *
+ * An ad account optimising for a new customer purchase already reports one, and its own
+ * figure is the one the operator steers by and sees in Ads Manager. Where the store has
+ * said that is how its account is set up, that number is used rather than a second
+ * estimate derived from Shopify — two different answers to the same question is worse
+ * than one, even when both are defensible.
+ */
+export function newCustomerRoas(
+  totals: PnlTotals,
+  metaReportsNewCustomersOnly: boolean,
+): { value: number; source: "meta" | "shopify"; available: boolean } {
+  if (metaReportsNewCustomersOnly && totals.platformSpend > 0) {
+    return { value: totals.platformRoas, source: "meta", available: true };
+  }
+  return {
+    value: totals.ncRoas,
+    source: "shopify",
+    available: totals.customersKnown,
+  };
 }

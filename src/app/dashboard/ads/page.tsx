@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { getActiveStore } from "@/lib/store";
-import { buildPnlReport } from "@/lib/pnl";
+import { buildPnlReport, newCustomerRoas } from "@/lib/pnl";
 import { formatDate, formatMoney, formatNumber, resolveRange } from "@/lib/format";
 import { round2 } from "@/lib/fees";
 import { Card, Empty, Stat, Td, Th } from "@/components/ui";
@@ -55,6 +55,7 @@ export default async function AdsPage({
   const campaigns = [...byCampaign.values()].sort((a, b) => b.spend - a.spend);
 
   const { totals } = report;
+  const ncRoas = newCustomerRoas(totals, store.metaReportsNewCustomersOnly);
 
   return (
     <div className="space-y-6">
@@ -74,15 +75,15 @@ export default async function AdsPage({
             ones they did not have to pay for. */}
         <Stat
           label="nc-ROAS"
-          value={totals.customersKnown ? `${totals.ncRoas.toFixed(2)}x` : "—"}
+          value={ncRoas.available ? `${ncRoas.value.toFixed(2)}x` : "—"}
           hint={
-            totals.customersKnown
-              ? "New customer revenue ÷ ad spend"
+            ncRoas.available
+              ? ncRoas.source === "meta"
+                ? "As Meta reports it"
+                : "New customer revenue ÷ ad spend"
               : "Needs customer data on orders"
           }
-          tone={
-            totals.customersKnown ? (totals.ncRoas >= 1 ? "positive" : "negative") : "neutral"
-          }
+          tone={ncRoas.available ? (ncRoas.value >= 1 ? "positive" : "negative") : "neutral"}
         />
         <Stat
           label="Blended ROAS"
@@ -122,7 +123,7 @@ export default async function AdsPage({
       </Card>
 
       <Card title="New customers only, against all orders">
-        <NewCustomerPanel totals={totals} currency={currency} />
+        <NewCustomerPanel totals={totals} currency={currency} ncRoas={ncRoas} />
       </Card>
 
       <Card title="Spend by platform">

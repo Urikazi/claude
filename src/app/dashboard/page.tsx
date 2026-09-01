@@ -3,6 +3,7 @@ import {
   buildPnlReport,
   buildProductPnl,
   countUncostedVariants,
+  newCustomerRoas,
   percentChange,
   previousRange,
 } from "@/lib/pnl";
@@ -35,6 +36,8 @@ export default async function OverviewPage({
 
   const { totals } = report;
   const prior = previous.totals;
+  const ncRoas = newCustomerRoas(totals, store.metaReportsNewCustomersOnly);
+  const priorNcRoas = newCustomerRoas(prior, store.metaReportsNewCustomersOnly);
   const totalCosts = totals.cogs + totals.shippingCost + totals.handlingCost;
   const totalFees = totals.processorFees + totals.shopifyFees;
   const priorCosts = prior.cogs + prior.shippingCost + prior.handlingCost;
@@ -113,8 +116,8 @@ export default async function OverviewPage({
               // not pay for. POAS earns profit rather than revenue back.
               {
                 label: "nc-ROAS",
-                value: totals.customersKnown ? `${totals.ncRoas.toFixed(2)}x` : "—",
-                c: totals.customersKnown ? change(totals.ncRoas, prior.ncRoas) : null,
+                value: ncRoas.available ? `${ncRoas.value.toFixed(2)}x` : "—",
+                c: ncRoas.available ? change(ncRoas.value, priorNcRoas.value) : null,
                 up: true,
               },
               { label: "Blended ROAS", value: `${totals.roas.toFixed(2)}x`, c: change(totals.roas, prior.roas), up: true },
@@ -144,8 +147,8 @@ export default async function OverviewPage({
           // Spending more is not itself bad, but on this page it is a cost line.
           higherIsBetter={false}
           hint={
-            totals.customersKnown
-              ? `nc-ROAS ${totals.ncRoas.toFixed(2)}x · CAC ${formatMoney(totals.cac, currency)}`
+            ncRoas.available
+              ? `nc-ROAS ${ncRoas.value.toFixed(2)}x · CAC ${formatMoney(totals.cac, currency)}`
               : `ROAS ${totals.roas.toFixed(2)}x · CPA ${formatMoney(totals.cpa, currency)}`
           }
         />
@@ -225,7 +228,7 @@ export default async function OverviewPage({
               ["Blended ROAS", `${totals.roas.toFixed(2)}x`],
               [
                 "nc-ROAS",
-                totals.customersKnown ? `${totals.ncRoas.toFixed(2)}x` : "—",
+                ncRoas.available ? `${ncRoas.value.toFixed(2)}x` : "—",
               ],
               [
                 "Cost to acquire a customer",
