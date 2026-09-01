@@ -442,10 +442,16 @@ export async function countUncostedVariants(storeId: string): Promise<number> {
  * estimate derived from Shopify — two different answers to the same question is worse
  * than one, even when both are defensible.
  */
+export type SourcedFigure = {
+  value: number;
+  source: "meta" | "shopify";
+  available: boolean;
+};
+
 export function newCustomerRoas(
   totals: PnlTotals,
   metaReportsNewCustomersOnly: boolean,
-): { value: number; source: "meta" | "shopify"; available: boolean } {
+): SourcedFigure {
   if (metaReportsNewCustomersOnly && totals.platformSpend > 0) {
     return { value: totals.platformRoas, source: "meta", available: true };
   }
@@ -453,5 +459,26 @@ export function newCustomerRoas(
     value: totals.ncRoas,
     source: "shopify",
     available: totals.customersKnown,
+  };
+}
+
+/**
+ * What a new customer costs, from the same place the return on them comes from.
+ *
+ * An account reporting new customers only calls this cost per purchase, and it is the
+ * denominator of its own ROAS — so taking one from Meta and the other from Shopify would
+ * describe a customer neither source is describing.
+ */
+export function newCustomerCost(
+  totals: PnlTotals,
+  metaReportsNewCustomersOnly: boolean,
+): SourcedFigure {
+  if (metaReportsNewCustomersOnly && totals.platformConversions > 0) {
+    return { value: totals.platformCostPerPurchase, source: "meta", available: true };
+  }
+  return {
+    value: totals.cac,
+    source: "shopify",
+    available: totals.customersKnown && totals.cac > 0,
   };
 }

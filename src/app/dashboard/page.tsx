@@ -3,6 +3,7 @@ import {
   buildPnlReport,
   buildProductPnl,
   countUncostedVariants,
+  newCustomerCost,
   newCustomerRoas,
   percentChange,
   previousRange,
@@ -38,6 +39,7 @@ export default async function OverviewPage({
   const prior = previous.totals;
   const ncRoas = newCustomerRoas(totals, store.metaReportsNewCustomersOnly);
   const priorNcRoas = newCustomerRoas(prior, store.metaReportsNewCustomersOnly);
+  const ncCost = newCustomerCost(totals, store.metaReportsNewCustomersOnly);
   const totalCosts = totals.cogs + totals.shippingCost + totals.handlingCost;
   const totalFees = totals.processorFees + totals.shopifyFees;
   const priorCosts = prior.cogs + prior.shippingCost + prior.handlingCost;
@@ -148,7 +150,7 @@ export default async function OverviewPage({
           higherIsBetter={false}
           hint={
             ncRoas.available
-              ? `nc-ROAS ${ncRoas.value.toFixed(2)}x · CAC ${formatMoney(totals.cac, currency)}`
+              ? `nc-ROAS ${ncRoas.value.toFixed(2)}x · CAC ${formatMoney(ncCost.value, currency)}`
               : `ROAS ${totals.roas.toFixed(2)}x · CPA ${formatMoney(totals.cpa, currency)}`
           }
         />
@@ -232,9 +234,7 @@ export default async function OverviewPage({
               ],
               [
                 "Cost to acquire a customer",
-                totals.customersKnown && totals.cac > 0
-                  ? formatMoney(totals.cac, currency)
-                  : "—",
+                ncCost.available ? formatMoney(ncCost.value, currency) : "—",
               ],
               ["POAS", `${totals.poas.toFixed(2)}x`],
               [

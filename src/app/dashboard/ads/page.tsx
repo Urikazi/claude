@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { getActiveStore } from "@/lib/store";
-import { buildPnlReport, newCustomerRoas } from "@/lib/pnl";
+import { buildPnlReport, newCustomerCost, newCustomerRoas } from "@/lib/pnl";
 import { formatDate, formatMoney, formatNumber, resolveRange } from "@/lib/format";
 import { round2 } from "@/lib/fees";
 import { Card, Empty, Stat, Td, Th } from "@/components/ui";
@@ -56,6 +56,7 @@ export default async function AdsPage({
 
   const { totals } = report;
   const ncRoas = newCustomerRoas(totals, store.metaReportsNewCustomersOnly);
+  const ncCost = newCustomerCost(totals, store.metaReportsNewCustomersOnly);
 
   return (
     <div className="space-y-6">
@@ -98,12 +99,12 @@ export default async function AdsPage({
         />
         <Stat
           label="Cost per new customer"
-          value={
-            totals.customersKnown && totals.cac > 0 ? formatMoney(totals.cac, currency) : "—"
-          }
+          value={ncCost.available ? formatMoney(ncCost.value, currency) : "—"}
           hint={
-            totals.customersKnown
-              ? `${formatNumber(totals.newCustomerOrders)} first orders`
+            ncCost.available
+              ? ncCost.source === "meta"
+                ? "As Meta reports it"
+                : `${formatNumber(totals.newCustomerOrders)} first orders`
               : "Needs customer data on orders"
           }
         />
@@ -123,7 +124,12 @@ export default async function AdsPage({
       </Card>
 
       <Card title="New customers only, against all orders">
-        <NewCustomerPanel totals={totals} currency={currency} ncRoas={ncRoas} />
+        <NewCustomerPanel
+          totals={totals}
+          currency={currency}
+          ncRoas={ncRoas}
+          ncCost={ncCost}
+        />
       </Card>
 
       <Card title="Spend by platform">

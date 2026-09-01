@@ -1,4 +1,4 @@
-import type { PnlTotals } from "@/lib/pnl";
+import type { PnlTotals, SourcedFigure } from "@/lib/pnl";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { Td, Th } from "@/components/ui";
 
@@ -14,11 +14,13 @@ export function NewCustomerPanel({
   totals,
   currency,
   ncRoas,
+  ncCost,
 }: {
   totals: PnlTotals;
   currency: string;
-  /** Resolved once by the page so every place this number appears agrees. */
-  ncRoas: { value: number; source: "meta" | "shopify"; available: boolean };
+  /** Resolved once by the page so every place these numbers appear agree. */
+  ncRoas: SourcedFigure;
+  ncCost: SourcedFigure;
 }) {
   if (!totals.customersKnown) {
     return (
@@ -52,9 +54,12 @@ export function NewCustomerPanel({
     },
     {
       label: "Cost per order",
-      nc: totals.cac > 0 ? formatMoney(totals.cac, currency) : "—",
+      nc: ncCost.available ? formatMoney(ncCost.value, currency) : "—",
       all: totals.cpa > 0 ? formatMoney(totals.cpa, currency) : "—",
-      hint: "Ad spend ÷ orders, from Shopify",
+      hint:
+        ncCost.source === "meta"
+          ? "New customer figure from Meta; all orders from Shopify"
+          : "Ad spend ÷ orders, from Shopify",
     },
     {
       label: "Return on ad spend",
@@ -69,7 +74,7 @@ export function NewCustomerPanel({
 
   // What a first purchase leaves after the ad that bought it. Negative means each new
   // customer is acquired at a loss and has to be earned back on a second order.
-  const contribution = Math.round((totals.newCustomerAov - totals.cac) * 100) / 100;
+  const contribution = Math.round((totals.newCustomerAov - ncCost.value) * 100) / 100;
 
   return (
     <div className="space-y-4">
@@ -103,12 +108,12 @@ export function NewCustomerPanel({
         </table>
       </div>
 
-      {totals.cac > 0 ? (
+      {ncCost.available && ncCost.value > 0 ? (
         <p className="text-xs text-muted">
           A first order is worth{" "}
           <strong className="text-body">{formatMoney(totals.newCustomerAov, currency)}</strong> and
           costs{" "}
-          <strong className="text-body">{formatMoney(totals.cac, currency)}</strong> in ads, so it{" "}
+          <strong className="text-body">{formatMoney(ncCost.value, currency)}</strong> in ads, so it{" "}
           {contribution >= 0 ? (
             <>
               clears{" "}
