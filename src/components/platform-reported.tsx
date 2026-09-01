@@ -9,13 +9,19 @@ import { formatMoney, formatNumber } from "@/lib/format";
  * not equal the Shopify-derived figures beside them, and are not meant to — a platform
  * credits itself with sales it believes it caused, while Shopify records the ones that
  * happened. Both are useful; averaging them or preferring whichever looks better is not.
+ *
+ * What the conversion counts is the store's to declare. An account optimising for a
+ * new customer purchase already reports a new customer ROAS, and calling it a purchase
+ * ROAS covering everyone would misdescribe the store's own configuration.
  */
 export function PlatformReported({
   totals,
   currency,
+  newCustomersOnly = false,
 }: {
   totals: PnlTotals;
   currency: string;
+  newCustomersOnly?: boolean;
 }) {
   const hasData = totals.platformConversions > 0 || totals.platformConversionValue > 0;
 
@@ -30,18 +36,20 @@ export function PlatformReported({
 
   const tiles = [
     {
-      label: "Purchase ROAS",
+      label: newCustomersOnly ? "New customer ROAS" : "Purchase ROAS",
       value: `${totals.platformRoas.toFixed(2)}x`,
       hint: `${formatMoney(totals.platformConversionValue, currency)} attributed`,
       tone: totals.platformRoas >= 1,
     },
     {
-      label: "Cost per purchase",
+      label: newCustomersOnly ? "Cost per new customer" : "Cost per purchase",
       value:
         totals.platformCostPerPurchase > 0
           ? formatMoney(totals.platformCostPerPurchase, currency)
           : "—",
-      hint: `${formatNumber(totals.platformConversions)} purchases`,
+      hint: `${formatNumber(totals.platformConversions)} ${
+        newCustomersOnly ? "new customers" : "purchases"
+      }`,
       tone: null,
     },
   ];
@@ -65,8 +73,10 @@ export function PlatformReported({
       </div>
       <p className="text-xs text-muted">
         Straight from Meta, on its attribution and its window — the same figures Ads Manager
-        shows. Meta counts a sale when it believes its ad caused one, which is why these differ
-        from the Shopify-derived numbers above rather than confirming them.
+        shows.{" "}
+        {newCustomersOnly
+          ? "Your ad account is set to report new customers only, so this is already a new customer figure and can be read against the Shopify-derived one above. They still count differently — Meta credits a sale it believes its ad caused, Shopify records the sale that happened — so treat a gap as attribution, not as either being wrong."
+          : "Meta counts a sale when it believes its ad caused one, new customer or repeat, which is why these differ from the Shopify-derived numbers above rather than confirming them."}
       </p>
     </div>
   );

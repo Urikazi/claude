@@ -32,6 +32,7 @@ export default async function SettingsPage() {
             currency: store.currency,
             shopifyDomain: store.shopifyDomain,
             metaAdAccountId: store.metaAdAccountId,
+            metaReportsNewCustomersOnly: store.metaReportsNewCustomersOnly,
             paypalClientId: store.paypalClientId,
             paypalLiveMode: store.paypalLiveMode,
             timezone: store.timezone,

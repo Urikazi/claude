@@ -45,6 +45,7 @@ export type StoreSettings = {
   shopifyDomain: string | null;
   shopifyClientId: string | null;
   metaAdAccountId: string | null;
+  metaReportsNewCustomersOnly: boolean;
   paypalClientId: string | null;
   paypalLiveMode: boolean;
   hasShopifyToken: boolean;
@@ -174,6 +175,22 @@ export function ConnectionsForm({ store }: { store: StoreSettings }) {
             />
           </Field>
         </div>
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="metaReportsNewCustomersOnly"
+            defaultChecked={store.metaReportsNewCustomersOnly}
+            className="mt-0.5 h-4 w-4 rounded border-line"
+          />
+          <span>
+            Ads Manager reports new customers only
+            <span className="mt-0.5 block text-xs text-muted">
+              Tick this if the conversion your ads optimise for already excludes repeat buyers,
+              as a tracker configured for new customer purchases does. It only changes how
+              Meta&rsquo;s figures are labelled here — the numbers come from Meta either way.
+            </span>
+          </span>
+        </label>
       </div>
 
       <div className="space-y-3 border-t border-line pt-5">

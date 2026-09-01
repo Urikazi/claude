@@ -82,6 +82,7 @@ const credentialsSchema = z.object({
   paypalClientId: z.string().optional(),
   paypalClientSecret: z.string().optional(),
   paypalLiveMode: z.boolean(),
+  metaReportsNewCustomersOnly: z.boolean(),
 });
 
 /// A blank secret field means "leave the stored value alone", not "clear it".
@@ -124,6 +125,8 @@ export async function updateStoreSettings(
     paypalClientId: formData.get("paypalClientId")?.toString(),
     paypalClientSecret: formData.get("paypalClientSecret")?.toString(),
     paypalLiveMode: formData.get("paypalLiveMode") === "on",
+    metaReportsNewCustomersOnly:
+      formData.get("metaReportsNewCustomersOnly") === "on",
   });
   if (!parsed.success) return { ok: false, message: "Check the store name and currency." };
 
@@ -150,6 +153,7 @@ export async function updateStoreSettings(
       paypalClientId: keepIfBlank(data.paypalClientId),
       paypalClientSecret: keepIfBlank(data.paypalClientSecret),
       paypalLiveMode: data.paypalLiveMode,
+      metaReportsNewCustomersOnly: data.metaReportsNewCustomersOnly,
     },
   });
 

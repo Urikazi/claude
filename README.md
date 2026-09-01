@@ -26,6 +26,11 @@ window, so those numbers will not agree with the Shopify-derived ones beside the
 to. Attributed value is stored per day and divided at the end, never averaged: a ratio of totals,
 not a mean of ratios.
 
+What that conversion counts is yours to declare. If your ads optimise for a new customer purchase —
+as they do when a tracker feeds new customer conversions back to Meta — tick **Ads Manager reports
+new customers only** in settings and the figures are labelled as the new customer ones they already
+are. The numbers come from Meta either way; only their description changes.
+
 Return on ad spend is reported as **nc-ROAS** — new customer revenue over ad spend — alongside the
 blended figure. Ads buy first purchases; blended ROAS credits them with repeat orders that would
 have come anyway, so it reads high on a store with returning customers and moves for reasons the

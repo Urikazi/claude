@@ -114,7 +114,11 @@ export default async function AdsPage({
       </div>
 
       <Card title="As Meta reports it">
-        <PlatformReported totals={totals} currency={currency} />
+        <PlatformReported
+          totals={totals}
+          currency={currency}
+          newCustomersOnly={store.metaReportsNewCustomersOnly}
+        />
       </Card>
 
       <Card title="New customers only, against all orders">

@@ -58,6 +58,10 @@ model Store {
   // Meta Ads
   metaAdAccountId String? // e.g. act_123456789
   metaAccessToken String?
+  /// Whether the conversion the ad account optimises for already excludes repeat buyers.
+  /// A store tracking new customer purchases only gets a platform ROAS that is already a
+  /// new customer figure, and labelling it as covering everyone would misread it.
+  metaReportsNewCustomersOnly Boolean @default(false)
 
   // Payment processors
   stripeSecretKey    String?
