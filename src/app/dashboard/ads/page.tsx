@@ -66,12 +66,26 @@ export default async function AdsPage({
         <RangePicker />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <Stat label="Total spend" value={formatMoney(totals.adSpend, currency)} />
+        {/* nc-ROAS leads: ads buy first purchases, and blended credits them with repeat
+            ones they did not have to pay for. */}
         <Stat
-          label="ROAS"
+          label="nc-ROAS"
+          value={totals.customersKnown ? `${totals.ncRoas.toFixed(2)}x` : "—"}
+          hint={
+            totals.customersKnown
+              ? "New customer revenue ÷ ad spend"
+              : "Needs customer data on orders"
+          }
+          tone={
+            totals.customersKnown ? (totals.ncRoas >= 1 ? "positive" : "negative") : "neutral"
+          }
+        />
+        <Stat
+          label="Blended ROAS"
           value={`${totals.roas.toFixed(2)}x`}
-          hint="Net revenue ÷ ad spend"
+          hint="All revenue ÷ ad spend"
         />
         <Stat
           label="POAS"
@@ -80,9 +94,20 @@ export default async function AdsPage({
           tone={totals.poas >= 1 ? "positive" : "negative"}
         />
         <Stat
+          label="Cost per new customer"
+          value={
+            totals.customersKnown && totals.cac > 0 ? formatMoney(totals.cac, currency) : "—"
+          }
+          hint={
+            totals.customersKnown
+              ? `${formatNumber(totals.newCustomerOrders)} first orders`
+              : "Needs customer data on orders"
+          }
+        />
+        <Stat
           label="Cost per order"
           value={formatMoney(totals.cpa, currency)}
-          hint={`${formatNumber(totals.orders)} orders`}
+          hint={`${formatNumber(totals.orders)} orders, new and repeat`}
         />
       </div>
 

@@ -20,6 +20,12 @@ discounts and returns, plus shipping and tax — and broken out on the overview 
 reconciled against Shopify line by line. Anything the named rows do not cover, such as duties or
 tips, appears as its own row rather than being folded silently into another.
 
+Return on ad spend is reported as **nc-ROAS** — new customer revenue over ad spend — alongside the
+blended figure. Ads buy first purchases; blended ROAS credits them with repeat orders that would
+have come anyway, so it reads high on a store with returning customers and moves for reasons the
+spend had nothing to do with. **Cost per new customer** is the same idea from the other side. Both
+are withheld rather than guessed when orders carry no customer.
+
 The profit calculation:
 
 ```
@@ -92,10 +98,14 @@ the grant only works against a store the app is installed on. Then open App sett
 Credentials and copy the Client ID and a Secret into the settings page along with your
 `*.myshopify.com` domain. Access tokens are minted automatically and refreshed every 24 hours.
 
-`read_reports` is what allows sessions to be read, which conversion rate divides by; without it
-everything else still works and conversion falls back to ad clicks. Reading which customer placed
-an order — and so telling a first purchase from a repeat — additionally needs protected customer
-data access approved on the app. Without it, orders still sync and conversion is reported blended.
+`read_reports` allows sessions to be read, which conversion rate divides by; without it everything
+else still works and conversion falls back to ad clicks. `read_customers` allows the customer on an
+order to be read, and so a first purchase to be told from a repeat; without it orders still sync,
+conversion is reported blended, and nc-ROAS is withheld.
+
+Adding a scope changes only what the app asks for. The store grants it at install, so a new version
+must be released **and** the app reinstalled before anything changes — until then Shopify keeps
+refusing a scope the dashboard plainly lists.
 
 Add `read_all_orders` only if you need order history older than 60 days; it requires separate
 approval from Shopify. Without it the API returns the last 60 days, which matches the default

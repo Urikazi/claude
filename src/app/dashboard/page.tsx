@@ -104,14 +104,20 @@ export default async function OverviewPage({
               </span>
             </p>
           </div>
-          <dl className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+          <dl className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
             {[
               { label: "Orders", value: formatNumber(totals.orders), c: change(totals.orders, prior.orders), up: true },
               { label: "Units sold", value: formatNumber(totals.units), c: change(totals.units, prior.units), up: true },
               { label: "Margin", value: formatPercent(totals.margin), c: change(totals.margin, prior.margin), up: true },
-              // ROAS earns revenue back, POAS earns profit back; the pair together says
-              // whether a campaign that looks fine on revenue actually pays for itself.
-              { label: "ROAS", value: `${totals.roas.toFixed(2)}x`, c: change(totals.roas, prior.roas), up: true },
+              // nc-ROAS is the one to steer on: blended counts repeat buyers the ads did
+              // not pay for. POAS earns profit rather than revenue back.
+              {
+                label: "nc-ROAS",
+                value: totals.customersKnown ? `${totals.ncRoas.toFixed(2)}x` : "—",
+                c: totals.customersKnown ? change(totals.ncRoas, prior.ncRoas) : null,
+                up: true,
+              },
+              { label: "Blended ROAS", value: `${totals.roas.toFixed(2)}x`, c: change(totals.roas, prior.roas), up: true },
               { label: "POAS", value: `${totals.poas.toFixed(2)}x`, c: change(totals.poas, prior.poas), up: true },
             ].map((item) => (
               <div key={item.label}>
@@ -137,7 +143,11 @@ export default async function OverviewPage({
           change={change(totals.adSpend, prior.adSpend)}
           // Spending more is not itself bad, but on this page it is a cost line.
           higherIsBetter={false}
-          hint={`ROAS ${totals.roas.toFixed(2)}x · CPA ${formatMoney(totals.cpa, currency)}`}
+          hint={
+            totals.customersKnown
+              ? `nc-ROAS ${totals.ncRoas.toFixed(2)}x · CAC ${formatMoney(totals.cac, currency)}`
+              : `ROAS ${totals.roas.toFixed(2)}x · CPA ${formatMoney(totals.cpa, currency)}`
+          }
         />
         <Stat
           label="COGS"
@@ -213,6 +223,16 @@ export default async function OverviewPage({
               ],
               ["Units per order", totals.orders ? (totals.units / totals.orders).toFixed(2) : "0"],
               ["Blended ROAS", `${totals.roas.toFixed(2)}x`],
+              [
+                "nc-ROAS",
+                totals.customersKnown ? `${totals.ncRoas.toFixed(2)}x` : "—",
+              ],
+              [
+                "Cost to acquire a customer",
+                totals.customersKnown && totals.cac > 0
+                  ? formatMoney(totals.cac, currency)
+                  : "—",
+              ],
               ["POAS", `${totals.poas.toFixed(2)}x`],
               [
                 "Cost as share of revenue",

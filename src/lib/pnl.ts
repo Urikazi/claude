@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { DEFAULT_TIME_ZONE, addDays, zonedDayKey } from "@/lib/timezone";
 import { round2 } from "@/lib/fees";
+import { firstOrderIds } from "@/lib/customers";
 import { isVariantCosted } from "@/lib/cost-tiers";
 
 /** `timeZone` decides which calendar day an order falls on; UTC when unset. */
@@ -21,13 +22,26 @@ export type PnlTotals = {
   processorFees: number;
   shopifyFees: number;
   adSpend: number;
+  /** Orders that were the buyer's first, and what they brought in. */
+  newCustomerOrders: number;
+  newCustomerRevenue: number;
+  /** False when no order carries a customer, so nothing below can be trusted. */
+  customersKnown: boolean;
   grossProfit: number;
   netProfit: number;
   margin: number;
   roas: number;
+  /**
+   * New customer revenue over ad spend. Blended ROAS counts repeat buyers the ads did
+   * not have to pay for, so it reads high on a store with returning customers and says
+   * little about whether the spend is working.
+   */
+  ncRoas: number;
   poas: number;
   aov: number;
   cpa: number;
+  /** Ad spend per new customer acquired — what a first purchase actually costs. */
+  cac: number;
 };
 
 export type PnlDaily = PnlTotals & { date: string };
@@ -39,7 +53,7 @@ export type PnlReport = {
   feesBreakdown: { gateway: string; orders: number; fees: number }[];
 };
 
-const EMPTY: Omit<PnlTotals, "margin" | "roas" | "poas" | "aov" | "cpa"> = {
+const EMPTY: Omit<PnlTotals, "margin" | "roas" | "ncRoas" | "poas" | "aov" | "cpa" | "cac"> = {
   orders: 0,
   units: 0,
   grossRevenue: 0,
@@ -54,6 +68,9 @@ const EMPTY: Omit<PnlTotals, "margin" | "roas" | "poas" | "aov" | "cpa"> = {
   processorFees: 0,
   shopifyFees: 0,
   adSpend: 0,
+  newCustomerOrders: 0,
+  newCustomerRevenue: 0,
+  customersKnown: false,
   grossProfit: 0,
   netProfit: 0,
 };
@@ -93,12 +110,21 @@ function finalize(base: typeof EMPTY): PnlTotals {
     processorFees: round2(base.processorFees),
     shopifyFees: round2(base.shopifyFees),
     adSpend: round2(base.adSpend),
+    newCustomerRevenue: round2(base.newCustomerRevenue),
     margin: base.netRevenue > 0 ? round2((netProfit / base.netRevenue) * 100) : 0,
     roas: base.adSpend > 0 ? round2(base.netRevenue / base.adSpend) : 0,
+    ncRoas:
+      base.adSpend > 0 && base.customersKnown
+        ? round2(base.newCustomerRevenue / base.adSpend)
+        : 0,
     // Profit on ad spend: how much net profit each currency unit of ads returned.
     poas: base.adSpend > 0 ? round2(grossProfit / base.adSpend) : 0,
     aov: base.orders > 0 ? round2(base.netRevenue / base.orders) : 0,
     cpa: base.orders > 0 ? round2(base.adSpend / base.orders) : 0,
+    cac:
+      base.newCustomerOrders > 0 && base.customersKnown
+        ? round2(base.adSpend / base.newCustomerOrders)
+        : 0,
   };
 }
 
@@ -106,7 +132,7 @@ export async function buildPnlReport(
   storeId: string,
   range: DateRange,
 ): Promise<PnlReport> {
-  const [orders, adSpend] = await Promise.all([
+  const [orders, adSpend, firstIds] = await Promise.all([
     prisma.order.findMany({
       where: {
         storeId,
@@ -118,7 +144,12 @@ export async function buildPnlReport(
     prisma.adSpendEntry.findMany({
       where: { storeId, date: { gte: range.from, lte: range.to } },
     }),
+    firstOrderIds(storeId),
   ]);
+
+  // Without a customer on any order there is no first purchase to find, and reporting
+  // every order as one would make nc-ROAS read exactly as blended ROAS.
+  const customersKnown = orders.some((order) => order.customerId !== null);
 
   const buckets = new Map<string, typeof EMPTY>();
   const bucket = (key: string) => {
@@ -157,8 +188,15 @@ export async function buildPnlReport(
       }
     }
 
+    const isFirstPurchase = customersKnown && firstIds.has(order.id);
+
     for (const target of [totals, day]) {
       target.orders += 1;
+      target.customersKnown = customersKnown;
+      if (isFirstPurchase) {
+        target.newCustomerOrders += 1;
+        target.newCustomerRevenue += netRevenue;
+      }
       target.units += units;
       // Shopify's gross sales: line items at full price, before any discount.
       // The stored subtotal already has discounts taken off, so they go back on.

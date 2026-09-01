@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { DEFAULT_TIME_ZONE, addDays, daysBetween, zonedDayKey } from "@/lib/timezone";
 import type { DateRange } from "@/lib/pnl";
 import { round2 } from "@/lib/fees";
+import { firstOrderIds } from "@/lib/customers";
 
 /**
  * Conversion rate is orders divided by sessions, so it needs a traffic denominator
@@ -55,33 +56,6 @@ export type ConversionReport = {
 
 const rate = (numerator: number, denominator: number): number =>
   denominator > 0 ? (numerator / denominator) * 100 : 0;
-
-/**
- * Which orders were a customer's first.
- *
- * Taken from the earliest order we hold per customer rather than from Shopify's
- * lifetime order count, which describes the customer today rather than at the moment
- * of the order and would relabel every past order the moment someone bought again.
- *
- * Orders synced from a window that starts after a customer's real first purchase will
- * read as new. The count of orders with no customer at all is returned so a caller can
- * say how much of the split is guesswork.
- */
-export async function firstOrderIds(storeId: string): Promise<Set<string>> {
-  const orders = await prisma.order.findMany({
-    where: { storeId, customerId: { not: null } },
-    select: { id: true, customerId: true, processedAt: true },
-    orderBy: { processedAt: "asc" },
-  });
-  const seen = new Set<string>();
-  const first = new Set<string>();
-  for (const order of orders) {
-    if (seen.has(order.customerId!)) continue;
-    seen.add(order.customerId!);
-    first.add(order.id);
-  }
-  return first;
-}
 
 export async function buildConversionReport(
   storeId: string,
