@@ -185,9 +185,10 @@ export function ConnectionsForm({ store }: { store: StoreSettings }) {
           <span>
             Ads Manager reports new customers only
             <span className="mt-0.5 block text-xs text-muted">
-              Tick this if the conversion your ads optimise for already excludes repeat buyers,
-              as a tracker configured for new customer purchases does. It only changes how
-              Meta&rsquo;s figures are labelled here — the numbers come from Meta either way.
+              On when the conversion your ads optimise for already excludes repeat buyers, as a
+              tracker configured for new customer purchases does. nc-ROAS and cost per new
+              customer then show what Ads Manager shows. Untick it if your ads optimise for
+              every purchase, and both revert to figures worked out from Shopify orders.
             </span>
           </span>
         </label>
