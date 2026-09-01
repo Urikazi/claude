@@ -6,6 +6,7 @@ import { logout } from "@/lib/auth-actions";
 import { SyncButton } from "@/components/sync-button";
 import { NavLinks } from "@/components/nav-links";
 import { LastSynced } from "@/components/last-synced";
+import { BuildMarker } from "@/components/build-marker";
 
 export const dynamic = "force-dynamic";
 
@@ -32,11 +33,14 @@ export default async function DashboardLayout({
             <NavLinks />
           </Suspense>
         </div>
-        <form action={logout} className="border-t border-line px-5 py-4">
-          <button type="submit" className="text-xs text-muted hover:text-body">
-            Sign out
-          </button>
-        </form>
+        <div className="flex items-center justify-between gap-2 border-t border-line px-5 py-4">
+          <form action={logout}>
+            <button type="submit" className="text-xs text-muted hover:text-body">
+              Sign out
+            </button>
+          </form>
+          <BuildMarker />
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
