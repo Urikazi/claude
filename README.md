@@ -169,7 +169,9 @@ is usually behind it rather than wrong.
 Whether a customer is new is worked out from the earliest order held for them, not from Shopify's
 lifetime order count, which describes the customer today and would relabel past orders every time
 someone bought again. Customers whose first purchase predates your synced history therefore read
-as new.
+as new, and so do those whose earlier orders were synced before `read_customers` was granted —
+nothing links an unattributed order to its buyer. The page counts those orders and says so, since
+both cases undercount returning customers rather than failing visibly.
 
 ## Automating the sync
 

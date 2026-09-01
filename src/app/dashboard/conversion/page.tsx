@@ -74,6 +74,19 @@ export default async function ConversionPage({
         </div>
       ) : null}
 
+      {report.customersKnown && report.unattributedOrders > 0 ? (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">
+          {formatNumber(report.unattributedOrders)} older orders were synced before this app
+          could read customers, so nobody can be matched to them. A buyer whose earlier order is
+          among them reads as new today, which undercounts returning customers and overstates
+          the new customer rate. Set <strong>Look back</strong> to cover your history in{" "}
+          <Link href="/dashboard/settings" className="underline underline-offset-2">
+            settings
+          </Link>{" "}
+          and run <strong>Re-import every order in the window</strong> to fill them in.
+        </div>
+      ) : null}
+
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {/* With no customer on the orders, a first purchase cannot be told from a repeat.
             Showing 0% new and everything as returning would be stating the opposite of

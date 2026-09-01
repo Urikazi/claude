@@ -41,6 +41,14 @@ export type ConversionReport = {
   source: ConversionSource;
   /** False when no order carries a customer, so new and returning cannot be told apart. */
   customersKnown: boolean;
+  /**
+   * Orders held with no customer on them, anywhere in the store's history.
+   *
+   * A first purchase is recognised by the absence of an earlier one, so an
+   * unattributed past order cannot be matched to its buyer and their later order reads
+   * as a first. Any at all means returning customers are undercounted.
+   */
+  unattributedOrders: number;
   daily: ConversionDay[];
   totals: ConversionTotals;
 };
@@ -80,7 +88,7 @@ export async function buildConversionReport(
   range: DateRange,
 ): Promise<ConversionReport> {
   const timeZone = range.timeZone ?? DEFAULT_TIME_ZONE;
-  const [orders, traffic, adSpend, firstIds] = await Promise.all([
+  const [orders, traffic, adSpend, firstIds, unattributedOrders] = await Promise.all([
     prisma.order.findMany({
       where: { storeId, processedAt: { gte: range.from, lte: range.to } },
       select: {
@@ -100,6 +108,7 @@ export async function buildConversionReport(
       select: { date: true, clicks: true },
     }),
     firstOrderIds(storeId),
+    prisma.order.count({ where: { storeId, customerId: null } }),
   ]);
 
   const sessionTotal = traffic.reduce((sum, row) => sum + row.sessions, 0);
@@ -161,6 +170,7 @@ export async function buildConversionReport(
   return {
     source,
     customersKnown,
+    unattributedOrders,
     daily,
     totals: {
       visits: totals.visits,
