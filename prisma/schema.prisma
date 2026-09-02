@@ -169,7 +169,12 @@ model Order {
   /// Shopify customer this order belongs to. Whether the order is a first purchase is
   /// derived from the earliest order per customer rather than read from Shopify, whose
   /// lifetime order count reflects today rather than the moment of the order.
-  customerId String?
+  customerId         String?
+  /// Shopify's lifetime order count for that customer, read when the order was synced.
+  /// One identifies a first purchase without needing any history of our own, which is
+  /// what a store with subscription renewals needs: the repeat buyer's first order can
+  /// predate anything we hold.
+  customerOrderCount Int?
 
   /// Gross merchandise value before discounts.
   subtotal      Float @default(0)

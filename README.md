@@ -189,9 +189,14 @@ The split on this page divides that same total so you can see where it came from
 how long ago orders were last pulled in, since a dashboard that disagrees with Shopify's live view
 is usually behind it rather than wrong.
 
-Whether a customer is new is worked out from the earliest order held for them, not from Shopify's
-lifetime order count, which describes the customer today and would relabel past orders every time
-someone bought again. Customers whose first purchase predates your synced history therefore read
+Whether a customer is new is decided by Shopify's own lifetime order count where it has one: a
+customer with a single order ever is placing their first. Only where that count is missing does the
+earliest order held decide instead.
+
+That distinction matters on a store with subscriptions. A renewal is synced, the original purchase
+happened long before the sync window, and judging by held orders alone makes the renewal look like
+a first purchase — which counts a repeat buyer as a new customer and inflates every acquisition
+figure that follows. Customers whose first purchase predates your synced history therefore read
 as new, and so do those whose earlier orders were synced before `read_customers` was granted —
 nothing links an unattributed order to its buyer. The page counts those orders and says so, since
 both cases undercount returning customers rather than failing visibly.

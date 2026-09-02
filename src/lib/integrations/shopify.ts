@@ -211,6 +211,11 @@ export type ShopifyOrder = {
   displayFinancialStatus: string | null;
   shippingCountry: string | null;
   customerId: string | null;
+  /**
+   * How many orders Shopify says this customer has ever placed. One means this is their
+   * first, which is the only reading that needs no history of our own.
+   */
+  customerOrderCount: number | null;
   currencyCode: string;
   paymentGatewayNames: string[];
   subtotal: number;
@@ -249,7 +254,7 @@ const ordersQuery = (withCustomer: boolean) => `
         currencyCode
         paymentGatewayNames
         shippingAddress { countryCodeV2 }
-        ${withCustomer ? "customer { id }" : ""}
+        ${withCustomer ? "customer { id numberOfOrders }" : ""}
         # The original subtotal, not currentSubtotalPriceSet: the "current" fields are
         # net of returns and edits while totalPriceSet is not, and mixing the two leaves
         # a breakdown that cannot add up to its own total. Refunds are subtracted once,
@@ -303,7 +308,7 @@ type OrdersResponse = {
       processedAt: string;
       displayFinancialStatus: string | null;
       shippingAddress: { countryCodeV2: string | null } | null;
-      customer: { id: string } | null;
+      customer: { id: string; numberOfOrders?: string | number | null } | null;
       currencyCode: string;
       paymentGatewayNames: string[];
       subtotalPriceSet: MoneySet;
@@ -385,6 +390,13 @@ export async function fetchOrders(
         displayFinancialStatus: node.displayFinancialStatus,
         shippingCountry: node.shippingAddress?.countryCodeV2 ?? null,
         customerId: node.customer?.id ?? null,
+        // Returned as a string on this API; absent on stores that do not expose it.
+        customerOrderCount: (() => {
+          const raw = node.customer?.numberOfOrders;
+          if (raw === null || raw === undefined) return null;
+          const count = Number.parseInt(String(raw), 10);
+          return Number.isFinite(count) ? count : null;
+        })(),
         currencyCode: node.currencyCode,
         paymentGatewayNames: node.paymentGatewayNames ?? [],
         subtotal: money(node.subtotalPriceSet),

@@ -43,11 +43,11 @@ export type ConversionReport = {
   /** False when no order carries a customer, so new and returning cannot be told apart. */
   customersKnown: boolean;
   /**
-   * Orders held with no customer on them, anywhere in the store's history.
+   * Orders synced before Shopify's lifetime customer count was read.
    *
-   * A first purchase is recognised by the absence of an earlier one, so an
-   * unattributed past order cannot be matched to its buyer and their later order reads
-   * as a first. Any at all means returning customers are undercounted.
+   * Those fall back to judging a first purchase by the earliest order held, which is
+   * wrong for anyone whose history starts before the sync window — a subscription
+   * renewal most of all. Re-importing them settles it.
    */
   unattributedOrders: number;
   daily: ConversionDay[];
@@ -82,7 +82,7 @@ export async function buildConversionReport(
       select: { date: true, clicks: true },
     }),
     firstOrderIds(storeId),
-    prisma.order.count({ where: { storeId, customerId: null } }),
+    prisma.order.count({ where: { storeId, customerOrderCount: null } }),
   ]);
 
   const sessionTotal = traffic.reduce((sum, row) => sum + row.sessions, 0);

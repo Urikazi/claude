@@ -199,6 +199,7 @@ export async function syncShopifyOrders(
           financialStatus: order.displayFinancialStatus,
           shippingCountry: order.shippingCountry,
           customerId: order.customerId,
+          customerOrderCount: order.customerOrderCount,
           subtotal: order.subtotal,
           discountTotal: order.discounts,
           shippingTotal: order.shipping,

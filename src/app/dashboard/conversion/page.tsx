@@ -76,14 +76,16 @@ export default async function ConversionPage({
 
       {report.customersKnown && report.unattributedOrders > 0 ? (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">
-          {formatNumber(report.unattributedOrders)} older orders were synced before this app
-          could read customers, so nobody can be matched to them. A buyer whose earlier order is
-          among them reads as new today, which undercounts returning customers and overstates
-          the new customer rate. Set <strong>Look back</strong> to cover your history in{" "}
+          {formatNumber(report.unattributedOrders)} orders were synced before this app read how
+          many orders each customer has. Those are judged a first purchase by the earliest
+          order held, which is wrong for anyone whose history starts before your sync window
+          — a subscription renewal most of all. Orders synced from now on are judged by
+          Shopify&rsquo;s own count and are unaffected; to correct the older ones, set{" "}
+          <strong>Look back</strong> to cover your history in{" "}
           <Link href="/dashboard/settings" className="underline underline-offset-2">
             settings
           </Link>{" "}
-          and run <strong>Re-import every order in the window</strong> to fill them in.
+          and run <strong>Re-import every order in the window</strong>.
         </div>
       ) : null}
 
