@@ -37,6 +37,7 @@ export function ConversionChart({
     cvr: day.visits > 0 ? Number(day.cvr.toFixed(3)) : null,
     visits: day.visits,
     orders: day.orders,
+    newOrders: day.newOrders,
   }));
   const shown = new Set(points.map((point) => point.full));
 
@@ -72,7 +73,9 @@ export function ConversionChart({
             formatter={(value, name, item) => {
               if (value === null || value === undefined) return ["no data yet", String(name)];
               const row = item?.payload as (typeof points)[number] | undefined;
-              const suffix = row ? ` · ${row.orders} of ${row.visits} ${denominator}` : "";
+              // The count must match the line being read, not the total beside it.
+              const counted = customersKnown ? row?.newOrders : row?.orders;
+              const suffix = row ? ` · ${counted} of ${row.visits} ${denominator}` : "";
               return [`${Number(value).toFixed(2)}%${suffix}`, String(name)];
             }}
           />
@@ -96,25 +99,15 @@ export function ConversionChart({
               />
             ))}
 
-          {customersKnown ? (
-            <Line
-              type="monotone"
-              dataKey="newCvr"
-              name="New customer CVR"
-              stroke="#3987e5"
-              strokeWidth={2}
-              dot={false}
-            />
-          ) : null}
-          {/* Blended sits behind as context when new customers are known, and carries the
-              chart on its own when they are not. */}
+          {/* One line, not two: repeat buyers convert for reasons an edit to the store had
+              no part in, so a blended line moves for reasons this page cannot explain.
+              It carries the chart only where first purchases cannot be identified. */}
           <Line
             type="monotone"
-            dataKey="cvr"
-            name="Blended CVR"
-            stroke={customersKnown ? "#8d97ad" : "#3987e5"}
-            strokeWidth={customersKnown ? 1.5 : 2}
-            strokeDasharray={customersKnown ? "4 3" : undefined}
+            dataKey={customersKnown ? "newCvr" : "cvr"}
+            name={customersKnown ? "New customer CVR" : "Blended CVR"}
+            stroke="#3987e5"
+            strokeWidth={2}
             dot={false}
           />
         </LineChart>

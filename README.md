@@ -171,9 +171,10 @@ country and quantity, and country-specific prices win over anything typed per pr
 
 ## Conversion rate and the change log
 
-**Conversion rate** reports new customer orders per session, because a landing page or a creative
-is judged on strangers rather than on people who were coming back anyway. Blended and returning
-rates are shown beside it.
+**Conversion rate** reports new customer orders per session, and only those: a landing page or a
+creative is judged on strangers, and a repeat buyer converts for reasons neither had any part in.
+Repeat orders are counted and named so you can see what is being left out, but they are not in the
+rate. Blended stands in only where first purchases cannot be identified at all.
 
 Every edit you make — a price, a creative, a rewritten page — can be logged with the day it went
 live. Each one is marked on the chart and compared against an equal number of days either side,

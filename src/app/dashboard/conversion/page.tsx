@@ -87,39 +87,66 @@ export default async function ConversionPage({
         </div>
       ) : null}
 
+      {/* New customers only. A repeat buyer converts for reasons a landing page or a
+          creative had no part in, so counting them flatters every edit made to either.
+          Blended stands in only where first purchases cannot be told apart at all. */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {/* With no customer on the orders, a first purchase cannot be told from a repeat.
-            Showing 0% new and everything as returning would be stating the opposite of
-            what is known, so both are withheld until the data supports them. */}
-        <Stat
-          label="New customer CVR"
-          value={report.customersKnown ? pct(totals.newCvr) : "—"}
-          hint={
-            report.customersKnown
-              ? `${formatNumber(totals.newOrders)} first orders`
-              : "Needs customer data"
-          }
-          tone={report.customersKnown ? "positive" : "neutral"}
-        />
-        <Stat
-          label="Blended CVR"
-          value={pct(totals.cvr)}
-          hint={`${formatNumber(totals.orders)} orders in total`}
-        />
-        <Stat
-          label="Returning CVR"
-          value={report.customersKnown ? pct(totals.returningCvr) : "—"}
-          hint={
-            report.customersKnown
-              ? `${formatNumber(totals.returningOrders)} repeat orders`
-              : "Needs customer data"
-          }
-        />
-        <Stat
-          label={report.source === "sessions" ? "Sessions" : "Ad clicks"}
-          value={formatNumber(totals.visits)}
-          hint={report.source === "sessions" ? "From Shopify analytics" : "From Meta, as a stand-in"}
-        />
+        {report.customersKnown ? (
+          <>
+            <Stat
+              label="New customer CVR"
+              value={pct(totals.newCvr)}
+              hint={`${formatNumber(totals.newOrders)} first orders`}
+              tone="positive"
+            />
+            <Stat
+              label="New customers"
+              value={formatNumber(totals.newOrders)}
+              hint={`${formatNumber(totals.returningOrders)} repeat orders not counted`}
+            />
+            <Stat
+              label={report.source === "sessions" ? "Sessions" : "Ad clicks"}
+              value={formatNumber(totals.visits)}
+              hint={
+                report.source === "sessions"
+                  ? "From Shopify analytics"
+                  : "From Meta, as a stand-in"
+              }
+            />
+            <Stat
+              label="Revenue from new customers"
+              value={formatMoney(totals.newRevenue, store.currency)}
+              hint={
+                totals.revenue > 0
+                  ? `${((totals.newRevenue / totals.revenue) * 100).toFixed(1)}% of all revenue`
+                  : undefined
+              }
+            />
+          </>
+        ) : (
+          <>
+            <Stat
+              label="Blended CVR"
+              value={pct(totals.cvr)}
+              hint={`${formatNumber(totals.orders)} orders, new and repeat`}
+            />
+            <Stat label="New customer CVR" value="—" hint="Needs customer data" />
+            <Stat
+              label={report.source === "sessions" ? "Sessions" : "Ad clicks"}
+              value={formatNumber(totals.visits)}
+              hint={
+                report.source === "sessions"
+                  ? "From Shopify analytics"
+                  : "From Meta, as a stand-in"
+              }
+            />
+            <Stat
+              label="Revenue"
+              value={formatMoney(totals.revenue, store.currency)}
+              hint={`${formatNumber(totals.orders)} orders, net of refunds`}
+            />
+          </>
+        )}
       </div>
 
       {report.source === "sessions" ? (
