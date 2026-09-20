@@ -29,23 +29,8 @@ export function PriceListForm({
   const [bundledPending, startBundled] = useTransition();
   const [bundledState, setBundledState] = useState<ActionState>(null);
   const [chosenKey, setChosenKey] = useState(bundled[0]?.key ?? "");
-  // Keyed by SKU rather than held as one number: the main product and the add-on that
-  // ships with it are different things and rarely cost the same to make.
-  const [unitCosts, setUnitCosts] = useState<Record<string, string>>({});
 
   const chosen = bundled.find((entry) => entry.key === chosenKey) ?? bundled[0];
-
-  function importChosen() {
-    if (!chosen) return;
-    const costs: Record<string, number> = {};
-    for (const product of chosen.products) {
-      const raw = unitCosts[product.sku]?.trim();
-      if (raw) costs[product.sku] = Number(raw);
-    }
-    startBundled(async () =>
-      setBundledState(await importBundledPriceList(storeId, chosen.key, costs)),
-    );
-  }
 
   return (
     <Card>
@@ -94,48 +79,16 @@ export function PriceListForm({
             </label>
           ) : null}
 
-          {chosen.shippingOnly ? (
-            <div className="mt-3 rounded-lg border border-neg/40 bg-neg/5 p-3">
-              <p className="text-xs text-body">
-                <strong>{chosen.label}&rsquo;s quote covers shipping only.</strong>{" "}
-                {chosen.note ??
-                  "The supplier priced the parcel, not the product inside it."}{" "}
-                Enter what each unit costs to make and it is added on top of every quoted
-                total — without it each unit is costed at freight alone and the product&rsquo;s
-                whole margin is reported as profit.
-              </p>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {chosen.products.map((product) => (
-                  <label key={product.sku} className="text-xs text-muted">
-                    <span className="font-mono text-body">{product.sku}</span>
-                    {product.name ? ` — ${product.name}` : null}
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      inputMode="decimal"
-                      placeholder="Cost per unit"
-                      value={unitCosts[product.sku] ?? ""}
-                      onChange={(event) =>
-                        setUnitCosts((previous) => ({
-                          ...previous,
-                          [product.sku]: event.target.value,
-                        }))
-                      }
-                      className={`${inputClass} mt-1`}
-                    />
-                  </label>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button
               type="button"
               disabled={bundledPending}
               className={buttonClass}
-              onClick={importChosen}
+              onClick={() =>
+                startBundled(async () =>
+                  setBundledState(await importBundledPriceList(storeId, chosen.key)),
+                )
+              }
             >
               {bundledPending ? "Importing…" : `Load the ${chosen.label} price list`}
             </button>

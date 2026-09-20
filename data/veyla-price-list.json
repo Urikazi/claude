@@ -1,9 +1,8 @@
 {
- "source": "Veyla supplier quote 2026-07-29 (shipping only — see basis)",
+ "source": "Veyla supplier quote 2026-07-29",
  "currency": "USD",
- "currencyNote": "The supplier file does not label a currency. Read as USD because this is the same supplier, the same quote date and the same order of magnitude as the Derma Muse quote, which is in USD. Confirm with the supplier before trusting break-even CAC.",
- "basis": "shipping-only",
- "note": "The supplier sheet quotes shipping per parcel and nothing else: its COGS Model tab leaves manufacturing, packaging and fulfilment blank. Importing this list needs a product cost per unit, which is added on top of each quoted total.",
+ "currencyNote": "The supplier file does not label a currency. Read as USD because this is the same supplier, the same quote date and the same order of magnitude as the Derma Muse quote, which is in USD.",
+ "note": "These totals are landed cost — the goods and the shipping together — confirmed by the operator against the supplier. The workbook these were extracted from labels the quantity columns 'shipping cost' and leaves its COGS Model tab blank, but that wording was added by whoever reorganised the supplier's CSV, not by the supplier: the figures line up with the Derma Muse quote from the same supplier on the same date, which is landed, and freight alone could not come to more than that.",
  "products": [
   {
    "sku": "FL2601252",

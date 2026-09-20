@@ -53,8 +53,6 @@ export type BundledPriceListOption = {
   label: string;
   prices: number;
   countries: number;
-  shippingOnly: boolean;
-  note?: string;
   products: { sku: string; name?: string }[];
 };
 
@@ -64,8 +62,6 @@ export function bundledPriceListOptions(): BundledPriceListOption[] {
     label,
     prices,
     countries,
-    shippingOnly: list.basis === "shipping-only",
-    note: list.note,
     products: list.products.map(({ sku, name }) => ({ sku, name })),
   }));
 }
