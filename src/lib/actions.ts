@@ -31,46 +31,6 @@ import {
 
 export type ActionState = { ok: boolean; message: string } | null;
 
-const numeric = z.coerce.number().min(0).finite();
-
-const costSchema = z.object({
-  variantId: z.string().min(1),
-  cogs: numeric,
-  shippingCost: numeric,
-  handlingCost: numeric,
-});
-
-export async function updateVariantCosts(
-  _prev: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  await assertSession();
-  const parsed = costSchema.safeParse({
-    variantId: formData.get("variantId"),
-    cogs: formData.get("cogs"),
-    shippingCost: formData.get("shippingCost"),
-    handlingCost: formData.get("handlingCost"),
-  });
-  if (!parsed.success) return { ok: false, message: "Costs must be positive numbers." };
-
-  const { variantId, ...costs } = parsed.data;
-  await prisma.productVariant.update({ where: { id: variantId }, data: costs });
-
-  // Existing line items keep a cost snapshot, so push the new numbers onto them too.
-  await prisma.orderLineItem.updateMany({
-    where: { variantId },
-    data: {
-      unitCogs: costs.cogs,
-      unitShipping: costs.shippingCost,
-      unitHandling: costs.handlingCost,
-    },
-  });
-
-  revalidatePath("/dashboard/products");
-  revalidatePath("/dashboard");
-  return { ok: true, message: "Saved." };
-}
-
 const credentialsSchema = z.object({
   storeId: z.string().min(1),
   name: z.string().min(1),
