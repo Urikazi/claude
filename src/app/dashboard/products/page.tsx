@@ -5,6 +5,7 @@ import { Card, Empty, Th } from "@/components/ui";
 import { CogsRow, type VariantRow } from "@/components/cogs-row";
 import { PriceListForm, type TierSummary } from "@/components/price-list-form";
 import { isVariantCosted, resolveTierSku } from "@/lib/cost-tiers";
+import { bundledPriceListOptions } from "@/lib/bundled-price-lists";
 
 export const dynamic = "force-dynamic";
 
@@ -128,7 +129,11 @@ export default async function ProductsPage({
         </p>
       </div>
 
-      <PriceListForm storeId={store.id} summary={tierSummary} />
+      <PriceListForm
+        storeId={store.id}
+        summary={tierSummary}
+        bundled={bundledPriceListOptions()}
+      />
 
       <Card
         title={`${rows.length} variants · ${missing} without a cost`}

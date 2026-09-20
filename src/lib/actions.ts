@@ -9,10 +9,10 @@ import { ACTIVE_STORE_COOKIE } from "@/lib/store";
 import { DEFAULT_FEE_CONFIG } from "@/lib/fees";
 import { parseSpendPaste } from "@/lib/ad-spend-paste";
 import { DEFAULT_TIME_ZONE, isValidTimeZone } from "@/lib/timezone";
-import { parsePriceList, priceListToRows } from "@/lib/price-list";
+import { parsePriceList, priceListToRows, withUnitCosts } from "@/lib/price-list";
+import { findBundledPriceList } from "@/lib/bundled-price-lists";
 // Bundled at build time rather than read from disk, so it survives deployment to a
 // host that only ships the compiled output.
-import bundledPriceList from "../../data/derma-muse-price-list.json";
 import { ANY_COUNTRY } from "@/lib/cost-tiers";
 import { auditInvoice, parseInvoice, InvoiceFormatError } from "@/lib/invoice-audit";
 import { CHANGE_CATEGORIES } from "@/lib/change-categories";
@@ -562,13 +562,35 @@ export async function updateVariantCosting(
 }
 
 /**
- * Imports the price list that ships with the app. Copying a JSON file out of the
- * repository and pasting it into a textarea is a lot of ceremony for the one action
- * that makes profit numbers real, and it is where setup stalls.
+ * Imports one of the price lists that ship with the app.
+ *
+ * A shipping-only quote needs a product cost per unit before it means anything, so it
+ * is rejected without one rather than imported at freight cost — an import that looks
+ * like it worked and reports the product's whole margin as profit is worse than an
+ * error message.
  */
-export async function importBundledPriceList(storeId: string): Promise<ActionState> {
+export async function importBundledPriceList(
+  storeId: string,
+  key: string,
+  unitCosts: Record<string, number> = {},
+): Promise<ActionState> {
   await assertSession();
-  return applyPriceList(storeId, JSON.stringify(bundledPriceList));
+  const bundled = findBundledPriceList(key);
+  if (!bundled) return { ok: false, message: "That price list is not one of the bundled ones." };
+
+  let list = bundled.list;
+  if (list.basis === "shipping-only") {
+    const folded = withUnitCosts(list, unitCosts);
+    if (folded.missing.length) {
+      return {
+        ok: false,
+        message: `This quote covers shipping only. Enter the product cost per unit for ${folded.missing.join(", ")} first, or every unit is costed at freight alone and profit is overstated.`,
+      };
+    }
+    list = folded.list;
+  }
+
+  return applyPriceList(storeId, JSON.stringify(list));
 }
 
 const changeSchema = z.object({
