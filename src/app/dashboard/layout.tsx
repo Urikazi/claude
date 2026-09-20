@@ -1,12 +1,12 @@
 import { Suspense } from "react";
-import Link from "next/link";
-import { getActiveStore } from "@/lib/store";
+import { getActiveStore, listStores } from "@/lib/store";
 import { requireSession } from "@/lib/session";
 import { logout } from "@/lib/auth-actions";
 import { SyncButton } from "@/components/sync-button";
 import { NavLinks } from "@/components/nav-links";
 import { LastSynced } from "@/components/last-synced";
 import { BuildMarker } from "@/components/build-marker";
+import { StoreSwitcher } from "@/components/store-switcher";
 
 export const dynamic = "force-dynamic";
 
@@ -17,15 +17,14 @@ export default async function DashboardLayout({
 }) {
   await requireSession();
   const store = await getActiveStore();
+  const stores = await listStores();
 
   return (
     <div className="flex min-h-screen">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-panel lg:flex">
         <div className="px-5 py-5">
-          <Link href="/dashboard" className="block text-sm font-semibold">
-            {store.name}
-          </Link>
-          <p className="mt-0.5 text-xs text-muted">Profit &amp; loss</p>
+          <StoreSwitcher stores={stores} activeId={store.id} />
+          <p className="mt-2 text-xs text-muted">Profit &amp; loss</p>
         </div>
         <div className="flex-1 px-2">
           {/* useSearchParams needs a boundary; the nav is not worth blocking the page for. */}

@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertSession } from "@/lib/session";
+import { ACTIVE_STORE_COOKIE } from "@/lib/store";
 import { DEFAULT_FEE_CONFIG } from "@/lib/fees";
 import { parseSpendPaste } from "@/lib/ad-spend-paste";
 import { DEFAULT_TIME_ZONE, isValidTimeZone } from "@/lib/timezone";
@@ -713,4 +715,58 @@ export async function deleteSupplierInvoice(
   await prisma.supplierInvoice.delete({ where: { id } }).catch(() => null);
   revalidatePath("/dashboard/invoices");
   return { ok: true, message: "Invoice removed." };
+}
+
+/**
+ * Switches which store the dashboard shows.
+ *
+ * Every report already scopes its queries by store, so the selection is the only thing
+ * that has to move; the cookie is read on the server so a switch lands before anything
+ * renders rather than flashing the previous store's figures.
+ */
+export async function selectStore(storeId: string): Promise<ActionState> {
+  await assertSession();
+  const store = await prisma.store.findUnique({
+    where: { id: storeId },
+    select: { id: true, name: true },
+  });
+  if (!store) return { ok: false, message: "That store no longer exists." };
+
+  (await cookies()).set(ACTIVE_STORE_COOKIE, store.id, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+
+  revalidatePath("/dashboard", "layout");
+  return { ok: true, message: `Showing ${store.name}.` };
+}
+
+export async function createStore(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const name = formData.get("name")?.toString().trim();
+  if (!name) return { ok: false, message: "Give the store a name." };
+  if (name.length > 80) return { ok: false, message: "That name is too long." };
+
+  const currency = formData.get("currency")?.toString().trim().toUpperCase() || "USD";
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    return { ok: false, message: "Currency must be a three-letter code, such as USD." };
+  }
+
+  const store = await prisma.store.create({
+    data: { name, currency, feeConfig: { create: DEFAULT_FEE_CONFIG } },
+  });
+
+  // Switched to immediately: the next thing anyone does with a new store is set it up.
+  await selectStore(store.id);
+  revalidatePath("/dashboard", "layout");
+  return {
+    ok: true,
+    message: `${name} added. Connect it in settings, then sync.`,
+  };
 }

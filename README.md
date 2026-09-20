@@ -97,6 +97,16 @@ To sync automatically every morning, set `SYNC_SECRET` and add `vercel.json`:
 with the cron sending `Authorization: Bearer $SYNC_SECRET`. Without that secret or a signed-in
 session, `/api/sync` returns 401.
 
+## Running more than one store
+
+The sidebar names the store every report is about, and doubles as the switcher. **+ Add store**
+creates another; the choice is kept in a cookie, so it follows you across every page and survives a
+reload rather than having to be carried on each link.
+
+Stores share nothing. Orders, products, costs, ad spend, sessions, invoices and fee rates all hang
+off the store they belong to, each gets its own credentials, and deleting one takes only its own
+rows with it. Connect a new store in settings and sync it exactly as you did the first.
+
 ## Connecting your accounts
 
 Everything is configured per-store at **/dashboard/settings**. Credentials are stored in your own
