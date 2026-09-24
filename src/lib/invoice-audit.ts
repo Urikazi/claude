@@ -84,23 +84,49 @@ const number = (value: string | undefined): number => {
  * is rather than by name: the second SKU is what the supplier billed against and the
  * second Qty is what it billed for, which are the two the audit turns on.
  */
+/**
+ * The same export arrives with English or Chinese headers depending on the day, so each
+ * is mapped to one canonical name before anything is located. The three country columns
+ * and the repeated quantity keep their order, which is what the positional rules below
+ * depend on.
+ */
+const HEADER_ALIASES: Record<string, string> = {
+  订单号: "Order number",
+  订单标识: "Order identification",
+  下单时间: "Date",
+  国家二字码: "Country",
+  收货人国家: "Country",
+  中文国家名: "Country",
+  产品名称: "Product",
+  产品总数: "Qty",
+  价格: "Price",
+  总价: "TOTAL Price",
+};
+
 function locateColumns(header: string[]) {
   // Case-insensitively: the supplier's exports are not consistent about it. One day's
   // sheet headed the tax column "EU TAX" and the next "EU Tax", which read as no tax
   // column at all and quietly reported every parcel's import tax as zero.
-  const same = (cell: string, name: string) =>
-    cell.trim().toUpperCase() === name.toUpperCase();
+  const canonical = header.map((cell) => {
+    const trimmed = cell.trim();
+    return HEADER_ALIASES[trimmed] ?? trimmed;
+  });
+  const same = (cell: string, name: string) => cell.toUpperCase() === name.toUpperCase();
   const positions = (name: string) =>
-    header.flatMap((cell, index) => (same(cell, name) ? [index] : []));
-  const find = (name: string) => header.findIndex((cell) => same(cell, name));
+    canonical.flatMap((cell, index) => (same(cell, name) ? [index] : []));
+  const find = (name: string) => canonical.findIndex((cell) => same(cell, name));
 
   const countries = positions("Country");
   const skus = positions("SKU");
   const quantities = positions("Qty");
+  // The English sheet names the order twice, the second "Order number-PY"; the Chinese
+  // one repeats the same header. Either way the second occurrence is the reference the
+  // supplier and the store both quote (DER79849 rather than 7683105-79849).
+  const orderNumbers = positions("Order number");
 
   return {
-    orderRef: find("Order number"),
-    reference: find("Order number-PY"),
+    orderRef: orderNumbers[0] ?? -1,
+    reference: orderNumbers[1] ?? find("Order number-PY"),
     date: find("Date"),
     country: countries[0] ?? -1,
     product: find("Product"),
