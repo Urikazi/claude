@@ -85,25 +85,31 @@ const number = (value: string | undefined): number => {
  * second Qty is what it billed for, which are the two the audit turns on.
  */
 function locateColumns(header: string[]) {
+  // Case-insensitively: the supplier's exports are not consistent about it. One day's
+  // sheet headed the tax column "EU TAX" and the next "EU Tax", which read as no tax
+  // column at all and quietly reported every parcel's import tax as zero.
+  const same = (cell: string, name: string) =>
+    cell.trim().toUpperCase() === name.toUpperCase();
   const positions = (name: string) =>
-    header.flatMap((cell, index) => (cell.trim() === name ? [index] : []));
+    header.flatMap((cell, index) => (same(cell, name) ? [index] : []));
+  const find = (name: string) => header.findIndex((cell) => same(cell, name));
 
   const countries = positions("Country");
   const skus = positions("SKU");
   const quantities = positions("Qty");
 
   return {
-    orderRef: header.findIndex((cell) => cell.trim() === "Order number"),
-    reference: header.findIndex((cell) => cell.trim() === "Order number-PY"),
-    date: header.findIndex((cell) => cell.trim() === "Date"),
+    orderRef: find("Order number"),
+    reference: find("Order number-PY"),
+    date: find("Date"),
     country: countries[0] ?? -1,
-    product: header.findIndex((cell) => cell.trim() === "Product"),
+    product: find("Product"),
     variantSku: skus[0] ?? -1,
     billedSku: skus[1] ?? skus[0] ?? -1,
     billedQuantity: quantities[1] ?? quantities[0] ?? -1,
-    price: header.findIndex((cell) => cell.trim() === "Price"),
-    tax: header.findIndex((cell) => cell.trim() === "EU TAX"),
-    total: header.findIndex((cell) => cell.trim() === "TOTAL Price"),
+    price: find("Price"),
+    tax: find("EU TAX"),
+    total: find("TOTAL Price"),
   };
 }
 
@@ -140,7 +146,7 @@ export function parseInvoice(text: string): { lines: InvoiceLine[]; statedTotal:
 
     lines.push({
       orderRef: at(columns.reference) || at(columns.orderRef),
-      date: at(columns.date).slice(0, 10),
+      date: at(columns.date).slice(0, 10).replace(/\//g, "-"),
       country: normalizeCountry(at(columns.country)),
       product: at(columns.product),
       variantSku: at(columns.variantSku),
