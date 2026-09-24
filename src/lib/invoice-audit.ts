@@ -111,7 +111,11 @@ function locateColumns(header: string[]) {
     const trimmed = cell.trim();
     return HEADER_ALIASES[trimmed] ?? trimmed;
   });
-  const same = (cell: string, name: string) => cell.toUpperCase() === name.toUpperCase();
+  // Whitespace is stripped as well as case: across four weeks the tax column has arrived
+  // as "EU TAX", "EU Tax" and "Eutax", and a header missed is a column silently read as
+  // zero — the August invoice that first showed "Eutax" came up exactly $70.00 short.
+  const key = (value: string) => value.replace(/\s+/g, "").toUpperCase();
+  const same = (cell: string, name: string) => key(cell) === key(name);
   const positions = (name: string) =>
     canonical.flatMap((cell, index) => (same(cell, name) ? [index] : []));
   const find = (name: string) => canonical.findIndex((cell) => same(cell, name));
