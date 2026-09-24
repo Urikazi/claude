@@ -141,7 +141,7 @@ export function parseInvoice(text: string): { lines: InvoiceLine[]; statedTotal:
     lines.push({
       orderRef: at(columns.reference) || at(columns.orderRef),
       date: at(columns.date).slice(0, 10),
-      country: at(columns.country).toUpperCase(),
+      country: normalizeCountry(at(columns.country)),
       product: at(columns.product),
       variantSku: at(columns.variantSku),
       billedSku,
@@ -192,6 +192,26 @@ export type InvoiceAudit = {
 
 /** A cent of slack, so a rounded quote does not read as a discrepancy. */
 const TOLERANCE = 0.011;
+
+/**
+ * The supplier bills Australia by zone — AU-1 and AU-3 — where the price list names the
+ * destinations AU and AU-REMOTE. Same supplier, same two zones, different labels on each
+ * side, and without this every Australian line reads as a destination nobody quoted.
+ *
+ * The mapping is confirmed by the invoice itself: AU-1 lines are billed 10.39 for two
+ * units, which is the AU two-unit quote to the cent, and AU-3 lines 15.29, which is the
+ * AU-REMOTE one. Anything else is passed through as written.
+ */
+const COUNTRY_ALIASES: Record<string, string> = {
+  "AU-1": "AU",
+  "AU-2": "AU",
+  "AU-3": "AU-REMOTE",
+};
+
+export function normalizeCountry(raw: string): string {
+  const code = raw.trim().toUpperCase();
+  return COUNTRY_ALIASES[code] ?? code;
+}
 
 export function auditInvoice(
   table: TierTable,
