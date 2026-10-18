@@ -10,7 +10,7 @@
  * two years Graph API versions get, so this needs checking a few times a year. An
  * expired version does not error loudly — calls quietly fall back to an older one.
  */
-export const META_API_VERSION = "v25.0";
+export const META_API_VERSION = "v26.0";
 
 export type MetaCredentials = {
   adAccountId: string;
@@ -51,6 +51,59 @@ class MetaError extends Error {
   constructor(message: string) {
     super(`Meta Ads: ${message}`);
   }
+}
+
+/**
+ * What Meta said, turned into what to do about it.
+ *
+ * Graph errors arrive as a wall of JSON that a sync panel truncates mid-token, so the
+ * one useful part — which of several unrelated problems this is — is the part that
+ * gets cut off. Each case below names the screen that fixes it, because the codes
+ * overlap: a permission error is as likely to be an unassigned asset as a missing
+ * scope, and the two are fixed in different places.
+ *
+ * Anything unrecognised is passed through whole rather than guessed at.
+ */
+export function explainMetaError(status: number, body: string): string {
+  let error: { message?: string; code?: number; error_subcode?: number; type?: string } = {};
+  try {
+    error = (JSON.parse(body) as { error?: typeof error }).error ?? {};
+  } catch {
+    return `${status} ${body}`.slice(0, 300);
+  }
+
+  const message = error.message ?? `HTTP ${status}`;
+  const code = error.code;
+
+  // Meta returns this when the app itself may not call the Marketing API, before it
+  // looks at the account. Nothing about the token or the account id will change it.
+  if (/api access blocked/i.test(message)) {
+    return `${message} Your Meta app is not allowed to call the Marketing API — this is set on the app, not on the ad account or the token. Check App Dashboard → Marketing API → Settings for the access level, and Business Settings → Security Centre for business verification.`;
+  }
+
+  if (code === 190) {
+    return `${message} The access token is expired or revoked. Generate a new one under Business Settings → System users and paste it in again.`;
+  }
+
+  if (code === 200 || code === 10 || code === 299) {
+    return `${message} The token is missing the ads_read permission, or this ad account is not assigned to the system user. Business Settings → System users → Add assets → Ad accounts, with View performance.`;
+  }
+
+  if (code === 100) {
+    return `${message} Check the ad account id — it is the act_... value from Ads Manager.`;
+  }
+
+  // Throttling is the one case that fixes itself, so say so rather than sending
+  // someone to a settings screen that is already correct.
+  if (code === 4 || code === 17 || code === 32 || code === 613) {
+    return `${message} Meta is rate limiting this account. The next sync should go through.`;
+  }
+
+  if (code === 2635 || /deprecat/i.test(message)) {
+    return `${message} This Marketing API version has been retired — META_API_VERSION needs raising.`;
+  }
+
+  return `${status} ${message}`;
 }
 
 export function normalizeAccountId(id: string): string {
@@ -125,7 +178,7 @@ export async function fetchDailySpend(
   for (let page = 0; page < 50 && url; page += 1) {
     const response = await fetch(url, { cache: "no-store" });
     if (!response.ok) {
-      throw new MetaError(`${response.status} ${await response.text()}`);
+      throw new MetaError(explainMetaError(response.status, await response.text()));
     }
     const payload = (await response.json()) as {
       data?: InsightRow[];
@@ -171,7 +224,7 @@ export async function verifyCredentials(credentials: MetaCredentials) {
     { cache: "no-store" },
   );
   if (!response.ok) {
-    throw new MetaError(`${response.status} ${await response.text()}`);
+    throw new MetaError(explainMetaError(response.status, await response.text()));
   }
   return (await response.json()) as {
     name: string;
