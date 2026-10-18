@@ -44,16 +44,128 @@ export type StoreSettings = {
   timezone: string;
   shopifyDomain: string | null;
   shopifyClientId: string | null;
-  metaAdAccountId: string | null;
+  metaAccounts: MetaAccountRow[];
   metaReportsNewCustomersOnly: boolean;
   paypalClientId: string | null;
   paypalLiveMode: boolean;
   hasShopifyToken: boolean;
   hasShopifyClientSecret: boolean;
-  hasMetaToken: boolean;
   hasStripeKey: boolean;
   hasPaypalSecret: boolean;
 };
+
+export type MetaAccountRow = {
+  /** Blank on a row the user has just added and not yet saved. */
+  id: string;
+  accountId: string;
+  label: string;
+  active: boolean;
+  /** Whether a token is already stored, so the field can say "leave blank to keep". */
+  hasToken: boolean;
+};
+
+/** A client-side key for rows that have no database id yet. */
+let nextDraftKey = 0;
+
+/**
+ * The store's Meta ad accounts, as a list that can be added to and removed from.
+ *
+ * Rows are submitted with the rest of the settings form under indexed names, so the
+ * whole list saves in one go. Removing a row simply drops it from the submission —
+ * there is no separate delete, and so no way for a half-finished edit to be saved
+ * against an account that is on its way out.
+ */
+function MetaAccountsField({ initial }: { initial: MetaAccountRow[] }) {
+  const [rows, setRows] = useState<(MetaAccountRow & { key: string })[]>(() =>
+    initial.map((row, index) => ({ ...row, key: row.id || `draft-${index}` })),
+  );
+
+  const add = () => {
+    nextDraftKey += 1;
+    setRows((current) => [
+      ...current,
+      {
+        key: `draft-new-${nextDraftKey}`,
+        id: "",
+        accountId: "",
+        label: "",
+        active: true,
+        hasToken: false,
+      },
+    ]);
+  };
+
+  const remove = (key: string) => setRows((current) => current.filter((row) => row.key !== key));
+
+  return (
+    <div className="space-y-3">
+      {rows.length === 0 ? (
+        <p className="text-xs text-muted">No ad accounts connected yet.</p>
+      ) : null}
+
+      {rows.map((row, index) => (
+        <div key={row.key} className="rounded-lg border border-line p-3 space-y-3">
+          <input type="hidden" name={`metaAccount.${index}.id`} value={row.id} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Ad account ID">
+              <input
+                name={`metaAccount.${index}.accountId`}
+                defaultValue={row.accountId}
+                placeholder="act_1234567890"
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Name (optional)">
+              <input
+                name={`metaAccount.${index}.label`}
+                defaultValue={row.label}
+                placeholder="US prime"
+                className={inputClass}
+              />
+            </Field>
+          </div>
+          <Field label="Access token">
+            <input
+              name={`metaAccount.${index}.token`}
+              type="password"
+              placeholder={
+                row.hasToken ? "•••••••• (leave blank to keep)" : "Long-lived token with ads_read"
+              }
+              className={inputClass}
+            />
+          </Field>
+          <div className="flex items-center justify-between gap-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                name={`metaAccount.${index}.active`}
+                defaultChecked={row.active}
+                className="h-4 w-4 rounded border-line"
+              />
+              <span>
+                Sync this account
+                <span className="ml-2 text-xs text-muted">
+                  Untick to keep the credentials but skip it.
+                </span>
+              </span>
+            </label>
+            <button
+              type="button"
+              onClick={() => remove(row.key)}
+              className={ghostButtonClass}
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ))}
+
+      <button type="button" onClick={add} className={ghostButtonClass}>
+        + Add ad account
+      </button>
+    </div>
+  );
+}
 
 export function ConnectionsForm({ store }: { store: StoreSettings }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
@@ -155,26 +267,11 @@ export function ConnectionsForm({ store }: { store: StoreSettings }) {
         <h3 className="text-sm font-semibold">Meta Ads</h3>
         <p className="text-xs text-muted">
           Create a Meta app with the Marketing API product and generate a long-lived token holding
-          the <code>ads_read</code> permission.
+          the <code>ads_read</code> permission. Add an account per ad account you spend from — all
+          of their spend lands on this store&rsquo;s P&amp;L, and each is fetched with its own
+          token, so one that stops working does not take the others down with it.
         </p>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Ad account ID">
-            <input
-              name="metaAdAccountId"
-              defaultValue={store.metaAdAccountId ?? ""}
-              placeholder="act_1234567890"
-              className={inputClass}
-            />
-          </Field>
-          <Field label="Access token">
-            <input
-              name="metaAccessToken"
-              type="password"
-              placeholder={secretPlaceholder(store.hasMetaToken)}
-              className={inputClass}
-            />
-          </Field>
-        </div>
+        <MetaAccountsField initial={store.metaAccounts} />
         <label className="flex items-start gap-2 text-sm">
           <input
             type="checkbox"
@@ -185,7 +282,7 @@ export function ConnectionsForm({ store }: { store: StoreSettings }) {
           <span>
             Ads Manager reports new customers only
             <span className="mt-0.5 block text-xs text-muted">
-              On when the conversion your ads optimise for already excludes repeat buyers, as a
+              On when the conversions your ads optimise for already exclude repeat buyers, as a
               tracker configured for new customer purchases does. nc-ROAS and cost per new
               customer then show what Ads Manager shows. Untick it if your ads optimise for
               every purchase, and both revert to figures worked out from Shopify orders.

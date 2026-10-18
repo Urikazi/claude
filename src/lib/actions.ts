@@ -10,6 +10,7 @@ import { DEFAULT_FEE_CONFIG } from "@/lib/fees";
 import { parseSpendPaste } from "@/lib/ad-spend-paste";
 import { DEFAULT_TIME_ZONE, isValidTimeZone } from "@/lib/timezone";
 import { parsePriceList, priceListToRows } from "@/lib/price-list";
+import * as metaAds from "@/lib/integrations/meta-ads";
 import { findBundledPriceList } from "@/lib/bundled-price-lists";
 // Bundled at build time rather than read from disk, so it survives deployment to a
 // host that only ships the compiled output.
@@ -40,8 +41,6 @@ const credentialsSchema = z.object({
   shopifyClientId: z.string().optional(),
   shopifyClientSecret: z.string().optional(),
   shopifyAccessToken: z.string().optional(),
-  metaAdAccountId: z.string().optional(),
-  metaAccessToken: z.string().optional(),
   stripeSecretKey: z.string().optional(),
   paypalClientId: z.string().optional(),
   paypalClientSecret: z.string().optional(),
@@ -53,6 +52,137 @@ const credentialsSchema = z.object({
 function keepIfBlank(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+/**
+ * The Meta ad accounts submitted with the settings form.
+ *
+ * The list is read back whole rather than diffed field by field: rows arrive indexed
+ * (`metaAccount.0.accountId`), an existing row carries its id in a hidden field, and a
+ * row the browser did not send is one the user removed. That makes removal fall out of
+ * the same save as an edit, with no separate delete round trip to get out of step with.
+ */
+type SubmittedMetaAccount = {
+  id: string;
+  accountId: string;
+  label: string;
+  token: string;
+  active: boolean;
+};
+
+function readMetaAccounts(formData: FormData): SubmittedMetaAccount[] {
+  const rows = new Map<string, Partial<SubmittedMetaAccount>>();
+  for (const [key, value] of formData.entries()) {
+    const match = /^metaAccount\.(\d+)\.(id|accountId|label|token|active)$/.exec(key);
+    if (!match) continue;
+    const index = match[1];
+    const field = match[2] as "id" | "accountId" | "label" | "token" | "active";
+    const row = rows.get(index) ?? {};
+    if (field === "active") row.active = value.toString() === "on";
+    else row[field] = value.toString().trim();
+    rows.set(index, row);
+  }
+
+  return [...rows.entries()]
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([, row]) => ({
+      id: row.id ?? "",
+      accountId: row.accountId ?? "",
+      label: row.label ?? "",
+      token: row.token ?? "",
+      // A checkbox sends nothing when unticked, so its absence is the "off" signal.
+      active: row.active ?? false,
+    }))
+    // A blank row is the empty one left at the bottom of the form, not a request to
+    // save an account with no credentials.
+    .filter((row) => row.accountId || row.token || row.label || row.id);
+}
+
+/**
+ * A Meta app secret is 32 hex characters and an access token is not, so the easy
+ * paste-the-wrong-value mistake can be named here rather than surfacing days later as
+ * an opaque OAuthException mid-sync.
+ */
+function describeMetaTokenProblem(token: string): string | null {
+  if (!token) return null;
+  if (/^[0-9a-f]{32}$/i.test(token)) {
+    return "That looks like your Meta app secret, not an access token. Generate a long-lived token with the ads_read permission instead.";
+  }
+  if (token.length < 40) {
+    return "That does not look like a Meta access token — they are much longer. Copy the whole value.";
+  }
+  return null;
+}
+
+/**
+ * Writes the submitted account list over the stored one.
+ *
+ * Returns a message on refusal and null on success. Nothing is written until every
+ * row passes, so a typo in the third account cannot half-apply the first two.
+ */
+async function saveMetaAccounts(
+  storeId: string,
+  submitted: SubmittedMetaAccount[],
+): Promise<string | null> {
+  const existing = await prisma.metaAdAccount.findMany({ where: { storeId } });
+  const byId = new Map(existing.map((account) => [account.id, account]));
+
+  const resolved: {
+    id: string | null;
+    accountId: string;
+    accessToken: string;
+    label: string | null;
+    active: boolean;
+    position: number;
+  }[] = [];
+
+  for (const [position, row] of submitted.entries()) {
+    const stored = row.id ? byId.get(row.id) : undefined;
+    if (row.id && !stored) {
+      return "One of those ad accounts no longer exists. Reload the page and try again.";
+    }
+
+    const accountId = metaAds.normalizeAccountId(row.accountId);
+    if (!/^act_\d+$/.test(accountId)) {
+      return `"${row.accountId || "(blank)"}" is not an ad account id. Copy the act_... value from Ads Manager.`;
+    }
+
+    const tokenProblem = describeMetaTokenProblem(row.token);
+    if (tokenProblem) return tokenProblem;
+
+    // Blank means "leave the stored token alone" on an existing row, the same as every
+    // other secret on this page. On a new row there is nothing to leave alone.
+    const accessToken = row.token || stored?.accessToken;
+    if (!accessToken) {
+      return `${row.label || accountId} needs an access token.`;
+    }
+
+    if (resolved.some((other) => other.accountId === accountId)) {
+      return `${accountId} is listed twice. Each ad account can only be connected once.`;
+    }
+
+    resolved.push({
+      id: stored?.id ?? null,
+      accountId,
+      accessToken,
+      label: row.label || null,
+      active: row.active,
+      position,
+    });
+  }
+
+  const keptIds = new Set(resolved.map((row) => row.id).filter(Boolean) as string[]);
+  await prisma.$transaction([
+    prisma.metaAdAccount.deleteMany({
+      where: { storeId, id: { notIn: [...keptIds] } },
+    }),
+    ...resolved.map(({ id, ...data }) =>
+      id
+        ? prisma.metaAdAccount.update({ where: { id }, data })
+        : prisma.metaAdAccount.create({ data: { ...data, storeId } }),
+    ),
+  ]);
+  return null;
 }
 
 /**
@@ -83,8 +213,6 @@ export async function updateStoreSettings(
     shopifyClientId: formData.get("shopifyClientId")?.toString(),
     shopifyClientSecret: formData.get("shopifyClientSecret")?.toString(),
     shopifyAccessToken: formData.get("shopifyAccessToken")?.toString(),
-    metaAdAccountId: formData.get("metaAdAccountId")?.toString(),
-    metaAccessToken: formData.get("metaAccessToken")?.toString(),
     stripeSecretKey: formData.get("stripeSecretKey")?.toString(),
     paypalClientId: formData.get("paypalClientId")?.toString(),
     paypalClientSecret: formData.get("paypalClientSecret")?.toString(),
@@ -99,6 +227,11 @@ export async function updateStoreSettings(
   const tokenError = describeShopifyTokenProblem(keepIfBlank(data.shopifyAccessToken));
   if (tokenError) return { ok: false, message: tokenError };
 
+  // Before the store row, so a rejected ad account leaves the whole form unsaved
+  // rather than quietly keeping the other fields and dropping the accounts.
+  const metaError = await saveMetaAccounts(data.storeId, readMetaAccounts(formData));
+  if (metaError) return { ok: false, message: metaError };
+
   await prisma.store.update({
     where: { id: data.storeId },
     data: {
@@ -111,8 +244,6 @@ export async function updateStoreSettings(
       shopifyClientId: keepIfBlank(data.shopifyClientId),
       shopifyClientSecret: keepIfBlank(data.shopifyClientSecret),
       shopifyAccessToken: keepIfBlank(data.shopifyAccessToken),
-      metaAdAccountId: keepIfBlank(data.metaAdAccountId),
-      metaAccessToken: keepIfBlank(data.metaAccessToken),
       stripeSecretKey: keepIfBlank(data.stripeSecretKey),
       paypalClientId: keepIfBlank(data.paypalClientId),
       paypalClientSecret: keepIfBlank(data.paypalClientSecret),

@@ -9,6 +9,10 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const store = await getActiveStore();
+  const metaAccounts = await prisma.metaAdAccount.findMany({
+    where: { storeId: store.id },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+  });
   const logs = await prisma.syncLog.findMany({
     where: { storeId: store.id },
     orderBy: { startedAt: "desc" },
@@ -31,7 +35,15 @@ export default async function SettingsPage() {
             name: store.name,
             currency: store.currency,
             shopifyDomain: store.shopifyDomain,
-            metaAdAccountId: store.metaAdAccountId,
+            metaAccounts: metaAccounts.map((account) => ({
+              id: account.id,
+              accountId: account.accountId,
+              label: account.label ?? "",
+              active: account.active,
+              // The token itself never reaches the browser: only whether one is set,
+              // which is all the field needs to say "leave blank to keep".
+              hasToken: Boolean(account.accessToken),
+            })),
             metaReportsNewCustomersOnly: store.metaReportsNewCustomersOnly,
             paypalClientId: store.paypalClientId,
             paypalLiveMode: store.paypalLiveMode,
@@ -39,7 +51,6 @@ export default async function SettingsPage() {
             shopifyClientId: store.shopifyClientId,
             hasShopifyToken: Boolean(store.shopifyAccessToken),
             hasShopifyClientSecret: Boolean(store.shopifyClientSecret),
-            hasMetaToken: Boolean(store.metaAccessToken),
             hasStripeKey: Boolean(store.stripeSecretKey),
             hasPaypalSecret: Boolean(store.paypalClientSecret),
           }}

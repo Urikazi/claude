@@ -55,10 +55,10 @@ model Store {
   shopifyClientSecret String?
   shopifyAccessToken  String?
 
-  // Meta Ads
-  metaAdAccountId             String? // e.g. act_123456789
-  metaAccessToken             String?
-  /// Whether the conversion the ad account optimises for already excludes repeat buyers.
+  // Meta Ads. Accounts live in MetaAdAccount: a store commonly runs several (one per
+  // market, or a replacement opened after a ban), and their spend all lands on the
+  // same P&L, so one account per store would undercount it.
+  /// Whether the conversions the ad accounts optimise for already exclude repeat buyers.
   /// A store tracking new customer purchases only gets a platform ROAS that is already a
   /// new customer figure, and labelling it as covering everyone would misread it.
   ///
@@ -77,6 +77,7 @@ model Store {
   products  Product[]
   orders    Order[]
   adSpend   AdSpendEntry[]
+  metaAccounts MetaAdAccount[]
   syncLogs  SyncLog[]
   costTiers SupplierCostTier[]
   traffic   DailyTraffic[]
@@ -233,6 +234,36 @@ model OrderLineItem {
   @@index([variantId])
 }
 
+/// One Meta ad account a store draws spend from.
+///
+/// Each carries its own token rather than sharing one: accounts often sit in different
+/// business portfolios, and a single token good for all of them is the exception, not
+/// the rule. A token that stops working then costs that one account, not the lot.
+model MetaAdAccount {
+  id      String @id @default(cuid())
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  /// The `act_...` value from Ads Manager, normalised to carry the prefix.
+  accountId String
+  /// A long-lived token holding `ads_read`. Read access only: nothing here writes
+  /// to a campaign, and a token that could would be a liability, not a feature.
+  accessToken String
+  /// What to call it on screen. Blank falls back to the account id.
+  label String?
+  /// Unticked keeps the credentials but skips the account on every sync, which is
+  /// how a disabled or disputed account stops erroring without being thrown away.
+  active Boolean @default(true)
+  /// Display order, so the list does not reshuffle between saves.
+  position Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([storeId, accountId])
+  @@index([storeId])
+}
+
 model AdSpendEntry {
   id      String @id @default(cuid())
   storeId String
@@ -243,6 +274,10 @@ model AdSpendEntry {
 
   campaignId   String  @default("")
   campaignName String?
+  /// Which ad account billed this row. Not part of the key below: Meta campaign ids
+  /// are unique across accounts, so two accounts cannot collide on one. It is kept
+  /// for display and for clearing one account's rows without touching another's.
+  adAccountId  String  @default("")
 
   spend           Float @default(0)
   impressions     Int   @default(0)

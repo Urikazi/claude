@@ -296,29 +296,64 @@ export async function syncShopifyOrders(
   return { source: "shopify-orders", records: count, message: finalMessage };
 }
 
+/**
+ * Pulls daily campaign spend from every Meta ad account the store has connected.
+ *
+ * Each account is fetched on its own and its failure kept to itself: a store running
+ * several usually has them in separate business portfolios, so one expired token or
+ * one account under review should not cost the sync the other accounts' spend. The
+ * run reports what came back and what did not, and only fails outright when nothing
+ * at all could be fetched.
+ */
 export async function syncMetaAds(
   storeId: string,
   sinceDays = 60,
 ): Promise<SyncResult> {
   const startedAt = new Date();
-  const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
-  if (!store.metaAdAccountId || !store.metaAccessToken) {
+  const accounts = await prisma.metaAdAccount.findMany({
+    where: { storeId, active: true },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+  });
+  if (!accounts.length) {
     throw new NotConfiguredError("Meta Ads");
   }
 
   const since = new Date(Date.now() - sinceDays * 86_400_000);
-  const rows = await meta.fetchDailySpend(
-    { adAccountId: store.metaAdAccountId, accessToken: store.metaAccessToken },
-    since,
-    new Date(),
-  );
+  const until = new Date();
+
+  const fetched: meta.MetaDailySpend[] = [];
+  const failures: string[] = [];
+  const perAccount: string[] = [];
+
+  for (const account of accounts) {
+    const name = account.label?.trim() || account.accountId;
+    try {
+      const rows = await meta.fetchDailySpend(
+        { adAccountId: account.accountId, accessToken: account.accessToken },
+        since,
+        until,
+      );
+      fetched.push(...rows);
+      perAccount.push(`${name}: ${rows.length}`);
+    } catch (error) {
+      failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Nothing came back from anywhere: that is a failed sync, not an empty one, and
+  // saying so beats reporting a clean run over zero rows.
+  if (!fetched.length && failures.length) {
+    const message = failures.join(" | ");
+    await logSync(storeId, "meta", "error", message, 0, startedAt);
+    throw new Error(message);
+  }
 
   // Batched for the same reason as orders: a daily-by-campaign breakdown over 60
   // days is hundreds of rows, and one round trip each does not fit in a request.
   const CHUNK = 200;
-  for (let start = 0; start < rows.length; start += CHUNK) {
+  for (let start = 0; start < fetched.length; start += CHUNK) {
     await prisma.$transaction(
-      rows.slice(start, start + CHUNK).map((row) => {
+      fetched.slice(start, start + CHUNK).map((row) => {
         const date = new Date(`${row.date}T00:00:00.000Z`);
         const data = {
           storeId,
@@ -326,6 +361,7 @@ export async function syncMetaAds(
           platform: "meta",
           campaignId: row.campaignId,
           campaignName: row.campaignName,
+          adAccountId: row.adAccountId,
           spend: row.spend,
           impressions: row.impressions,
           clicks: row.clicks,
@@ -348,9 +384,25 @@ export async function syncMetaAds(
     );
   }
 
-  const message = `Synced ${rows.length} daily campaign rows.`;
-  await logSync(storeId, "meta", "success", message, rows.length, startedAt);
-  return { source: "meta", records: rows.length, message };
+  // Named per account rather than totalled, because "synced 2 rows" over several
+  // accounts hides which one went quiet — the number that matters when an account is
+  // newly connected or a token has just lapsed.
+  const reached = accounts.length - failures.length;
+  const across =
+    accounts.length > 1
+      ? ` from ${reached} of ${accounts.length} ad accounts (${perAccount.join(", ")})`
+      : "";
+  const warning = failures.length ? ` Could not reach ${failures.join(" | ")}` : "";
+  const message = `Synced ${fetched.length} daily campaign rows${across}.${warning}`;
+  await logSync(
+    storeId,
+    "meta",
+    failures.length ? "error" : "success",
+    message,
+    fetched.length,
+    startedAt,
+  );
+  return { source: "meta", records: fetched.length, message };
 }
 
 /// Replaces fee estimates with the real amounts Stripe and PayPal charged.

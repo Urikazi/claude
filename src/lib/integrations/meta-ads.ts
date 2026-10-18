@@ -19,6 +19,8 @@ export type MetaCredentials = {
 
 export type MetaDailySpend = {
   date: string; // YYYY-MM-DD
+  /// The `act_...` account this row was billed to.
+  adAccountId: string;
   campaignId: string;
   campaignName: string;
   spend: number;
@@ -51,7 +53,7 @@ class MetaError extends Error {
   }
 }
 
-function normalizeAccountId(id: string): string {
+export function normalizeAccountId(id: string): string {
   const trimmed = id.trim();
   return trimmed.startsWith("act_") ? trimmed : `act_${trimmed}`;
 }
@@ -135,7 +137,14 @@ export async function fetchDailySpend(
     for (const row of payload.data ?? []) {
       rows.push({
         date: row.date_start,
-        campaignId: row.campaign_id ?? "",
+        adAccountId: account,
+        /**
+         * Meta campaign ids are unique across accounts, so they key a day's spend on
+         * their own. A row that arrives without one is the exception, and falling back
+         * to a bare "" would let two accounts' unattributed spend for the same day
+         * overwrite each other — the account id keeps them apart.
+         */
+        campaignId: row.campaign_id ?? `${account}:unattributed`,
         campaignName: row.campaign_name ?? "Unattributed",
         spend: Number.parseFloat(row.spend ?? "0") || 0,
         impressions: Number.parseInt(row.impressions ?? "0", 10) || 0,
