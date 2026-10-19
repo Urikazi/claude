@@ -1,36 +1,113 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { buttonClass, ghostButtonClass, inputClass } from "@/components/ui";
 import { clearAdvisorThread } from "@/lib/actions";
 
 export type AdvisorTurn = { id: string; role: string; content: string };
 
 /**
- * A plain-text renderer.
+ * Renders an advisor's reply.
  *
- * The replies are headings, short paragraphs, lists and the occasional table. Rendering
- * them as real markdown would mean trusting model output through a parser; splitting on
- * blank lines and bolding heading lines gets the same readability with no HTML at all.
+ * The briefs ask for verdicts, scorecards and prioritised actions, and both models
+ * answer in markdown — headings, bold figures, comparison tables. Rendered as plain
+ * text that arrives as literal asterisks and pipe characters, which is unreadable
+ * exactly where the numbers matter most.
+ *
+ * Markdown is turned into React elements rather than HTML: no raw-HTML plugin is
+ * enabled, so there is no markup from model output to inject. The element map styles
+ * it with the dashboard's own table and type scale, so a figure in a reply reads the
+ * same as a figure in a report.
  */
 function Reply({ text }: { text: string }) {
   return (
-    <div className="space-y-2 text-sm leading-relaxed">
-      {text.split(/\n{2,}/).map((block, index) => {
-        const heading = /^#{1,4}\s+(.*)$/.exec(block.trim());
-        if (heading) {
-          return (
-            <p key={index} className="pt-1 text-sm font-semibold">
-              {heading[1]}
-            </p>
-          );
-        }
-        return (
-          <p key={index} className="whitespace-pre-wrap">
-            {block}
-          </p>
-        );
-      })}
+    <div className="advisor-reply space-y-3 text-sm leading-relaxed">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => (
+            <h3 className="pt-1 text-sm font-semibold text-fg">{children}</h3>
+          ),
+          h2: ({ children }) => (
+            <h3 className="pt-1 text-sm font-semibold text-fg">{children}</h3>
+          ),
+          h3: ({ children }) => (
+            <h4 className="pt-1 text-sm font-semibold text-fg">{children}</h4>
+          ),
+          h4: ({ children }) => (
+            <h4 className="pt-1 text-xs font-semibold uppercase tracking-wide text-muted">
+              {children}
+            </h4>
+          ),
+          p: ({ children }) => <p className="text-sm leading-relaxed">{children}</p>,
+          strong: ({ children }) => (
+            <strong className="font-semibold text-fg">{children}</strong>
+          ),
+          em: ({ children }) => <em className="italic">{children}</em>,
+          ul: ({ children }) => (
+            <ul className="list-disc space-y-1 pl-5 text-sm">{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="list-decimal space-y-1 pl-5 text-sm">{children}</ol>
+          ),
+          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+          // Tables carry the figures, so they get the dashboard's own table styling
+          // and a scroll container — a per-country breakdown is wider than the column.
+          table: ({ children }) => (
+            <div className="-mx-1 overflow-x-auto px-1">
+              <table className="w-full border-collapse text-xs">{children}</table>
+            </div>
+          ),
+          thead: ({ children }) => <thead className="text-muted">{children}</thead>,
+          tr: ({ children }) => <tr className="border-b border-line">{children}</tr>,
+          // `style` carries the column alignment from the markdown (`|---:|`), which a
+          // financial table needs: a column of figures is only comparable down the
+          // page when the digits line up on the right.
+          th: ({ children, style }) => (
+            <th
+              style={style}
+              className="whitespace-nowrap px-2 py-1.5 text-left text-xs font-medium uppercase tracking-wide text-muted"
+            >
+              {children}
+            </th>
+          ),
+          td: ({ children, style }) => (
+            <td style={style} className="px-2 py-1.5 align-top tabular-nums">
+              {children}
+            </td>
+          ),
+          code: ({ children }) => (
+            <code className="rounded bg-accent/10 px-1 py-0.5 font-mono text-[0.85em]">
+              {children}
+            </code>
+          ),
+          pre: ({ children }) => (
+            <pre className="overflow-x-auto rounded-lg border border-line p-3 font-mono text-xs">
+              {children}
+            </pre>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-accent/50 pl-3 text-sm text-body">
+              {children}
+            </blockquote>
+          ),
+          hr: () => <hr className="border-line" />,
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-accent underline"
+            >
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
