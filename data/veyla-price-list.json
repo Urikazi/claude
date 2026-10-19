@@ -1,8 +1,7 @@
 {
-  "source": "Veyla supplier quotes: FL2601612 customised serum 2026-10-17; FL2601252 and FL2601148 2026-07-29",
+  "source": "Veyla supplier quote 2026-10-17 (customised serum FL2601612 plus add-ons); FL2601252 from the 2026-07-29 quote",
   "currency": "USD",
-  "currencyNote": "The supplier file does not label a currency. Read as USD because this is the same supplier, the same quote date and the same order of magnitude as the Derma Muse quote, which is in USD.",
-  "note": "FL2601612 is the customised serum quoted 2026-10-17 (MOQ 10,000, made to order, no stock). FL2601252 is the retired serum, kept so orders shipped before 2026-09-21 still cost. FL2601148 is the shampoo add-on. The serum actually shipping since 2026-09-21, FL2601024, has never been quoted and is deliberately absent rather than guessed at.",
+  "note": "FL2601612 is the customised serum quoted 2026-10-17 (MOQ 10,000, made to order, no stock). FL2601574 and FL2601148 are quoted flat per unit for every destination — the sheet gives them no country column — so they carry a single catch-all tier. FL2601252 is the retired serum, kept so orders shipped before 2026-09-21 still cost. FL2601024, the serum actually shipping since then, has never been quoted and is deliberately absent rather than guessed at.",
   "products": [
     {
       "sku": "FL2601612",
@@ -310,6 +309,34 @@
           17.55,
           25.45,
           33.4
+        ]
+      }
+    },
+    {
+      "sku": "FL2601574",
+      "name": "Titanium Advanced Dermaroller",
+      "tiers": {
+        "*": [
+          1.5,
+          3.0,
+          4.5,
+          6.0,
+          7.5,
+          9.0
+        ]
+      }
+    },
+    {
+      "sku": "FL2601148",
+      "name": "Korea's #1 Hair Growth Shampoo",
+      "tiers": {
+        "*": [
+          6.5,
+          13.0,
+          19.5,
+          26.0,
+          32.5,
+          39.0
         ]
       }
     },
@@ -812,47 +839,6 @@
           39.59,
           44.19,
           46.89
-        ]
-      }
-    },
-    {
-      "sku": "FL2601148",
-      "name": "Veyla add-on (ships with the main product)",
-      "tiers": {
-        "AU": [
-          6.5,
-          13.0,
-          19.5
-        ],
-        "CA": [
-          6.5,
-          13.0,
-          19.5
-        ],
-        "MX": [
-          6.5,
-          13.0,
-          19.5
-        ],
-        "SG": [
-          6.5,
-          13.0,
-          19.5
-        ],
-        "GB": [
-          6.5,
-          13.0,
-          19.5
-        ],
-        "US": [
-          6.5,
-          13.0,
-          19.5
-        ],
-        "*": [
-          6.5,
-          13.0,
-          19.5
         ]
       }
     }
