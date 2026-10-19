@@ -10,6 +10,7 @@ import { DEFAULT_FEE_CONFIG } from "@/lib/fees";
 import { parseSpendPaste } from "@/lib/ad-spend-paste";
 import { DEFAULT_TIME_ZONE, isValidTimeZone } from "@/lib/timezone";
 import { parsePriceList, priceListToRows } from "@/lib/price-list";
+import { parseCogsCsv, CogsCsvError } from "@/lib/supplier-cogs-csv";
 import * as metaAds from "@/lib/integrations/meta-ads";
 import { findBundledPriceList } from "@/lib/bundled-price-lists";
 // Bundled at build time rather than read from disk, so it survives deployment to a
@@ -409,6 +410,85 @@ async function applyPriceList(storeId: string, raw: string): Promise<ActionState
     ok: true,
     message: `Imported ${rows.length} prices across ${skus} products. Repriced ${priced} order lines.`,
   };
+}
+
+/** Supplier sheets run to a few hundred rows; past this it is not one of them. */
+const MAX_COGS_CSV_BYTES = 2_000_000;
+
+/**
+ * Imports the supplier's own COGS sheet.
+ *
+ * Unlike the JSON import this merges by SKU rather than replacing the list: a quote
+ * usually covers one product, and wiping the add-ons because the serum was requoted
+ * would silently drop them back to costing nothing. SKUs in the file are replaced
+ * whole — a new quote supersedes the old one for that product, destination for
+ * destination — and SKUs absent from it are left alone.
+ */
+export async function importCogsCsv(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const storeId = formData.get("storeId")?.toString();
+  if (!storeId) return { ok: false, message: "Missing store." };
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, message: "Choose a CSV exported from the supplier's COGS sheet." };
+  }
+  if (file.size > MAX_COGS_CSV_BYTES) {
+    return { ok: false, message: "That file is too large to be a COGS sheet." };
+  }
+
+  let report;
+  try {
+    report = parseCogsCsv(await file.text());
+  } catch (error) {
+    if (error instanceof CogsCsvError) return { ok: false, message: error.message };
+    throw error;
+  }
+
+  const rows = priceListToRows(report.list);
+  const skus = report.list.products.map((product) => product.sku);
+  await prisma.$transaction([
+    prisma.supplierCostTier.deleteMany({ where: { storeId, sku: { in: skus } } }),
+    prisma.supplierCostTier.createMany({ data: rows.map((row) => ({ storeId, ...row })) }),
+  ]);
+  const priced = await applyCostTiers(storeId);
+  revalidatePath("/dashboard", "layout");
+
+  const { products, destinations, prices } = report.counts;
+  const parts = [
+    `Imported ${prices} prices for ${products} ${products === 1 ? "product" : "products"} across ${destinations} SKU-destination pairs. Repriced ${priced} order lines.`,
+  ];
+  if (report.renamed.length) {
+    parts.push(
+      `Stored ${report.renamed.map((r) => `${r.from} as ${r.to}`).join(", ")}, which matches either spelling.`,
+    );
+  }
+  if (report.noShipping.length) {
+    parts.push(`Skipped ${report.noShipping.length} not-shippable: ${report.noShipping.join(", ")}.`);
+  }
+  if (report.unpriced.length) {
+    parts.push(`Priced nowhere on the sheet: ${report.unpriced.join(", ")}.`);
+  }
+  if (report.gapped.length) {
+    parts.push(
+      `Quoted with a gap, so those quantities interpolate: ${report.gapped
+        .map((g) => `${g.country} (no ${g.missing.join(", ")})`)
+        .join(", ")}.`,
+    );
+  }
+  // Worth saying out loud: a total that falls as quantity rises is a sheet error, and it
+  // is loaded as quoted because the supplier bills from the same sheet.
+  if (report.anomalies.length) {
+    parts.push(
+      `Check these with your supplier — the price drops as quantity rises: ${report.anomalies
+        .map((a) => `${a.country} ${a.from}u $${a.was.toFixed(2)} but ${a.to}u $${a.now.toFixed(2)}`)
+        .join("; ")}.`,
+    );
+  }
+  return { ok: true, message: parts.join(" ") };
 }
 
 const manualAdSpendSchema = z.object({

@@ -1,7 +1,12 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
-import { importBundledPriceList, importPriceList, type ActionState } from "@/lib/actions";
+import {
+  importBundledPriceList,
+  importCogsCsv,
+  importPriceList,
+  type ActionState,
+} from "@/lib/actions";
 import type { BundledPriceListOption } from "@/lib/bundled-price-lists";
 import { Card, buttonClass, ghostButtonClass, inputClass } from "@/components/ui";
 
@@ -23,6 +28,10 @@ export function PriceListForm({
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(
     importPriceList,
+    null,
+  );
+  const [csvState, csvAction, csvPending] = useActionState<ActionState, FormData>(
+    importCogsCsv,
     null,
   );
   const [open, setOpen] = useState(false);
@@ -105,6 +114,34 @@ export function PriceListForm({
           </div>
         </div>
       ) : null}
+
+      <form action={csvAction} className="mt-4 rounded-lg border border-line p-3">
+        <input type="hidden" name="storeId" value={storeId} />
+        <h3 className="text-xs font-semibold">Upload the supplier&rsquo;s COGS sheet</h3>
+        <p className="mt-1 text-xs text-muted">
+          Export the quote your supplier sends as CSV and drop it in as it comes — a row per
+          destination, a column per quantity. Prices for the SKUs in the file are replaced and
+          existing orders repriced; SKUs not in the file are left alone, so requoting one product
+          does not drop the others back to costing nothing. A destination the sheet does not
+          price is left out rather than costed from a neighbouring country.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <input
+            type="file"
+            name="file"
+            accept=".csv,text/csv"
+            className="text-xs text-body file:mr-3 file:rounded-md file:border-0 file:bg-accent/15 file:px-3 file:py-1.5 file:text-xs file:text-accent hover:file:bg-accent/25"
+          />
+          <button type="submit" disabled={csvPending} className={buttonClass}>
+            {csvPending ? "Importing…" : "Import CSV"}
+          </button>
+        </div>
+        {csvState ? (
+          <p className={`mt-2 text-xs ${csvState.ok ? "text-pos" : "text-neg"}`}>
+            {csvState.message}
+          </p>
+        ) : null}
+      </form>
 
       {summary.length > 0 ? (
         <div className="mt-4 overflow-x-auto">
