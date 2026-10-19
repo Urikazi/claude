@@ -6,13 +6,6 @@ import { clearAdvisorThread } from "@/lib/actions";
 
 export type AdvisorTurn = { id: string; role: string; content: string };
 
-const SUGGESTIONS = [
-  "Give me the financial verdict on the last 90 days.",
-  "What are my three largest profit leaks, quantified?",
-  "What can I afford to pay to acquire a customer?",
-  "Which destinations lose money once fees and fulfilment are in?",
-];
-
 /**
  * A plain-text renderer.
  *
@@ -45,11 +38,19 @@ function Reply({ text }: { text: string }) {
 export function AdvisorChat({
   storeId,
   storeName,
+  agent,
+  agentLabel,
+  suggestions,
+  days,
   initial,
   configured,
 }: {
   storeId: string;
   storeName: string;
+  agent: string;
+  agentLabel: string;
+  suggestions: string[];
+  days: number;
   initial: AdvisorTurn[];
   configured: boolean;
 }) {
@@ -80,7 +81,7 @@ export function AdvisorChat({
       const response = await fetch("/api/advisor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storeId, message: question }),
+        body: JSON.stringify({ storeId, agent, message: question }),
       });
       if (!response.ok || !response.body) {
         const payload = await response.json().catch(() => null);
@@ -142,12 +143,11 @@ export function AdvisorChat({
         {turns.length === 0 && !busy ? (
           <div className="rounded-lg border border-line p-4">
             <p className="text-sm text-body">
-              Every question is answered from a live snapshot of {storeName}&rsquo;s own figures —
-              the last 90 days of orders, COGS from your supplier quotes, fees, ad spend and
-              audited invoices — with estimates and gaps labelled as such.
+              Every question is answered from a live snapshot of {storeName}&rsquo;s own figures,
+              covering the last {days} days, with estimates and gaps labelled as such.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {SUGGESTIONS.map((suggestion) => (
+              {suggestions.map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"
@@ -189,7 +189,7 @@ export function AdvisorChat({
         ) : null}
 
         {busy && !streaming && !thinking ? (
-          <p className="text-xs text-muted">Reading the last 90 days…</p>
+          <p className="text-xs text-muted">Reading the last {days} days…</p>
         ) : null}
 
         {error ? <p className="text-xs text-neg">{error}</p> : null}
@@ -215,7 +215,7 @@ export function AdvisorChat({
           }}
           rows={3}
           disabled={busy || !configured}
-          placeholder={`Ask about ${storeName}'s profit, CAC, pricing, fees or cash. Paste a bank export or P&L to reconcile it.`}
+          placeholder={`Ask ${agentLabel.toLowerCase()} about ${storeName}. Paste a screenshot's figures or an export to have them read against this store's own numbers.`}
           className={`${inputClass} resize-y`}
         />
         <div className="flex flex-wrap items-center gap-3">
@@ -227,8 +227,8 @@ export function AdvisorChat({
               type="button"
               className={ghostButtonClass}
               onClick={async () => {
-                if (!confirm(`Clear this conversation for ${storeName}? It cannot be undone.`)) return;
-                await clearAdvisorThread(storeId);
+                if (!confirm(`Clear this ${agentLabel} conversation for ${storeName}? It cannot be undone.`)) return;
+                await clearAdvisorThread(storeId, agent);
                 setTurns([]);
               }}
             >

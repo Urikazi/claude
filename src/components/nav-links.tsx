@@ -13,7 +13,8 @@ const SECTIONS = [
       { href: "/dashboard/conversion", label: "Conversion rate", icon: "◈" },
       { href: "/dashboard/ads", label: "Ad spend", icon: "◑" },
       { href: "/dashboard/invoices", label: "Supplier invoices", icon: "▧" },
-      { href: "/dashboard/advisor", label: "CFO", icon: "◆" },
+      { href: "/dashboard/advisor/cfo", label: "CFO", icon: "◆" },
+      { href: "/dashboard/advisor/media-buyer", label: "Media buyer", icon: "◇" },
     ],
   },
   {

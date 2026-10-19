@@ -844,11 +844,14 @@ export async function updateAdvisorApiKey(
   };
 }
 
-/** Wipes the CFO conversation for one store. The brief and the figures are unaffected. */
-export async function clearAdvisorThread(storeId: string): Promise<ActionState> {
+/** Wipes one advisor's thread for one store. The other advisor's is untouched. */
+export async function clearAdvisorThread(
+  storeId: string,
+  agent: string,
+): Promise<ActionState> {
   await assertSession();
-  await prisma.advisorMessage.deleteMany({ where: { storeId } });
-  revalidatePath("/dashboard/advisor");
+  await prisma.advisorMessage.deleteMany({ where: { storeId, agent } });
+  revalidatePath("/dashboard/advisor", "layout");
   return { ok: true, message: "Conversation cleared." };
 }
 

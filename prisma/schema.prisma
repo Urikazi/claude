@@ -297,15 +297,20 @@ model AdSpendEntry {
   @@index([storeId, date])
 }
 
-/// One turn of the CFO conversation for a store.
+/// One turn of an advisor conversation for a store.
 ///
 /// Kept per store rather than per session: the advice is about a particular set of
 /// numbers, and a thread that followed the operator between brands would mix two
-/// businesses whose economics the brief asks to be analysed separately.
+/// businesses whose economics the briefs ask to be analysed separately.
 model AdvisorMessage {
   id      String @id @default(cuid())
   storeId String
   store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  /// Which advisor this turn belongs to — "cfo" or "media-buyer". They hold separate
+  /// threads: the two read different figures and give different advice, and one
+  /// transcript would have each answering questions put to the other.
+  agent   String @default("cfo")
 
   /// "user" or "assistant". Nothing else is stored: the brief lives in code, and a
   /// system turn written into the history would be an injection route.
@@ -314,7 +319,7 @@ model AdvisorMessage {
 
   createdAt DateTime @default(now())
 
-  @@index([storeId, createdAt])
+  @@index([storeId, agent, createdAt])
 }
 
 model SyncLog {

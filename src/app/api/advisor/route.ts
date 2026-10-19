@@ -1,8 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/db";
 import { hasValidSession } from "@/lib/session";
-import { ADVISOR_SYSTEM_PROMPT } from "@/lib/advisor/system-prompt";
-import { advisorRange, buildAdvisorContext } from "@/lib/advisor/context";
+import { findAdvisorAgent } from "@/lib/advisor/agents";
+import { advisorRange } from "@/lib/advisor/context";
 import { getAdvisorApiKey } from "@/lib/advisor/api-key";
 
 export const dynamic = "force-dynamic";
@@ -15,9 +15,6 @@ export const maxDuration = 300;
  * on a conversation that runs a few times a week and informs what gets spent.
  */
 const MODEL = "claude-opus-5-5";
-
-/// How much trading history each turn is answered from.
-const CONTEXT_DAYS = 90;
 
 /**
  * Turns kept in the thread.
@@ -40,12 +37,15 @@ export async function POST(request: Request) {
   const input = (await request.json().catch(() => null)) as {
     storeId?: string;
     message?: string;
+    agent?: string;
   } | null;
   const storeId = input?.storeId?.trim();
   const message = input?.message?.trim();
   if (!storeId || !message) {
     return Response.json({ error: "Missing store or message." }, { status: 400 });
   }
+  const agent = findAdvisorAgent(input?.agent?.trim());
+  if (!agent) return Response.json({ error: "Unknown advisor." }, { status: 400 });
   if (message.length > 100_000) {
     return Response.json({ error: "That message is too long to send." }, { status: 400 });
   }
@@ -65,13 +65,15 @@ export async function POST(request: Request) {
   }
 
   const history = await prisma.advisorMessage.findMany({
-    where: { storeId },
+    where: { storeId, agent: agent.key },
     orderBy: { createdAt: "desc" },
     take: HISTORY_TURNS,
   });
-  const snapshot = await buildAdvisorContext(storeId, advisorRange(store, CONTEXT_DAYS));
+  const snapshot = await agent.buildContext(storeId, advisorRange(store, agent.days));
 
-  await prisma.advisorMessage.create({ data: { storeId, role: "user", content: message } });
+  await prisma.advisorMessage.create({
+    data: { storeId, agent: agent.key, role: "user", content: message },
+  });
 
   const messages: Anthropic.MessageParam[] = [
     ...history
@@ -110,7 +112,7 @@ export async function POST(request: Request) {
           system: [
             {
               type: "text",
-              text: ADVISOR_SYSTEM_PROMPT,
+              text: agent.systemPrompt,
               cache_control: { type: "ephemeral" },
             },
           ],
@@ -139,7 +141,7 @@ export async function POST(request: Request) {
         }
         if (answer.trim()) {
           await prisma.advisorMessage.create({
-            data: { storeId, role: "assistant", content: answer },
+            data: { storeId, agent: agent.key, role: "assistant", content: answer },
           });
         }
         send({ type: "done", usage: final.usage.input_tokens + final.usage.output_tokens });
