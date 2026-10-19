@@ -803,6 +803,14 @@ const changeSchema = z.object({
   note: z.string().trim().max(2000).optional(),
 });
 
+/** Wipes the CFO conversation for one store. The brief and the figures are unaffected. */
+export async function clearAdvisorThread(storeId: string): Promise<ActionState> {
+  await assertSession();
+  await prisma.advisorMessage.deleteMany({ where: { storeId } });
+  revalidatePath("/dashboard/advisor");
+  return { ok: true, message: "Conversation cleared." };
+}
+
 export async function logStoreChange(
   _prev: ActionState,
   formData: FormData,

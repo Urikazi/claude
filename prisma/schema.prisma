@@ -83,6 +83,7 @@ model Store {
   traffic   DailyTraffic[]
   changes   StoreChange[]
   invoices  SupplierInvoice[]
+  advisorMessages AdvisorMessage[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -294,6 +295,26 @@ model AdSpendEntry {
 
   @@unique([storeId, date, platform, campaignId])
   @@index([storeId, date])
+}
+
+/// One turn of the CFO conversation for a store.
+///
+/// Kept per store rather than per session: the advice is about a particular set of
+/// numbers, and a thread that followed the operator between brands would mix two
+/// businesses whose economics the brief asks to be analysed separately.
+model AdvisorMessage {
+  id      String @id @default(cuid())
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  /// "user" or "assistant". Nothing else is stored: the brief lives in code, and a
+  /// system turn written into the history would be an injection route.
+  role    String
+  content String
+
+  createdAt DateTime @default(now())
+
+  @@index([storeId, createdAt])
 }
 
 model SyncLog {

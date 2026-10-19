@@ -16,6 +16,7 @@
     "vercel-build": "prisma generate && node scripts/migrate-deploy.mjs && next build"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@prisma/client": "6.19.3",
     "next": "16.3.3",
     "prisma": "6.19.3",
