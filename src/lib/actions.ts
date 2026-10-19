@@ -9,13 +9,13 @@ import { ACTIVE_STORE_COOKIE } from "@/lib/store";
 import { DEFAULT_FEE_CONFIG } from "@/lib/fees";
 import { parseSpendPaste } from "@/lib/ad-spend-paste";
 import { DEFAULT_TIME_ZONE, isValidTimeZone } from "@/lib/timezone";
-import { parsePriceList, priceListToRows } from "@/lib/price-list";
+import { parsePriceList, priceListToRows, withCountryFallback } from "@/lib/price-list";
 import { parseCogsCsv, CogsCsvError } from "@/lib/supplier-cogs-csv";
 import * as metaAds from "@/lib/integrations/meta-ads";
 import { findBundledPriceList } from "@/lib/bundled-price-lists";
 // Bundled at build time rather than read from disk, so it survives deployment to a
 // host that only ships the compiled output.
-import { ANY_COUNTRY } from "@/lib/cost-tiers";
+import { ANY_COUNTRY, resolveTierSku } from "@/lib/cost-tiers";
 import { auditInvoice, parseInvoice, InvoiceFormatError } from "@/lib/invoice-audit";
 import { CHANGE_CATEGORIES } from "@/lib/change-categories";
 import {
@@ -391,7 +391,10 @@ async function applyPriceList(storeId: string, raw: string): Promise<ActionState
   const parsed = parsePriceList(raw);
   if (!parsed.ok) return { ok: false, message: parsed.message };
 
-  const rows = priceListToRows(parsed.list);
+  // An order to a country the quote skips would otherwise cost nothing at all, so the
+  // US price stands in. See withCountryFallback for why that is the lesser error.
+  const { list, applied } = withCountryFallback(parsed.list);
+  const rows = priceListToRows(list);
 
   // Replace rather than merge: a new quote supersedes the old one, and leaving
   // stale tiers behind would silently price some orders off last quarter's sheet.
@@ -405,10 +408,13 @@ async function applyPriceList(storeId: string, raw: string): Promise<ActionState
   const priced = await applyCostTiers(storeId);
   revalidatePath("/dashboard", "layout");
 
-  const skus = parsed.list.products.length;
+  const skus = list.products.length;
+  const fallback = applied.length
+    ? ` Destinations the quote skips are costed at the US price for ${applied.join(", ")}.`
+    : "";
   return {
     ok: true,
-    message: `Imported ${rows.length} prices across ${skus} products. Repriced ${priced} order lines.`,
+    message: `Imported ${rows.length} prices across ${skus} products. Repriced ${priced} order lines.${fallback}`,
   };
 }
 
@@ -448,19 +454,61 @@ export async function importCogsCsv(
     throw error;
   }
 
-  const rows = priceListToRows(report.list);
-  const skus = report.list.products.map((product) => product.sku);
+  const { list, applied } = withCountryFallback(report.list);
+  const rows = priceListToRows(list);
+  const skus = list.products.map((product) => product.sku);
   await prisma.$transaction([
     prisma.supplierCostTier.deleteMany({ where: { storeId, sku: { in: skus } } }),
     prisma.supplierCostTier.createMany({ data: rows.map((row) => ({ storeId, ...row })) }),
   ]);
   const priced = await applyCostTiers(storeId);
+
+  /**
+   * Which SKUs the store actually sells that nothing now prices.
+   *
+   * A sheet can import cleanly and still leave the main product costing nothing: the
+   * supplier quotes Veyla's serum as FL2601612 while the orders carry FL2601024, so a
+   * CSV naming only the quoted code reports hundreds of prices and reprices almost
+   * nothing. Checking what the orders use against what is priced turns that from a
+   * silent success into a named gap.
+   */
+  const sold = await prisma.orderLineItem.findMany({
+    where: { order: { storeId }, sku: { not: null } },
+    distinct: ["sku"],
+    select: { sku: true },
+  });
+  const pricedSkus = new Set(
+    (
+      await prisma.supplierCostTier.findMany({
+        where: { storeId },
+        distinct: ["sku"],
+        select: { sku: true },
+      })
+    ).map((row) => row.sku),
+  );
+  const unmatched = sold
+    .map((row) => row.sku!)
+    .filter((sku) => !resolveTierSku(pricedSkus, sku))
+    .sort();
+
   revalidatePath("/dashboard", "layout");
 
   const { products, destinations, prices } = report.counts;
   const parts = [
     `Imported ${prices} prices for ${products} ${products === 1 ? "product" : "products"} across ${destinations} SKU-destination pairs. Repriced ${priced} order lines.`,
   ];
+  // Named first: an unpriced SKU the store sells costs the whole of its fulfilment,
+  // which dwarfs every other note here.
+  if (unmatched.length) {
+    parts.push(
+      `Still costing nothing, because your orders use ${unmatched.join(", ")} and no loaded sheet prices ${unmatched.length === 1 ? "it" : "them"} — check whether your supplier quotes the same product under a different code.`,
+    );
+  }
+  if (applied.length) {
+    parts.push(
+      `Destinations the sheet skips are costed at the US price for ${applied.join(", ")} — better than costing nothing, but the US is cheap, so those read low.`,
+    );
+  }
   if (report.renamed.length) {
     parts.push(
       `Stored ${report.renamed.map((r) => `${r.from} as ${r.to}`).join(", ")}, which matches either spelling.`,

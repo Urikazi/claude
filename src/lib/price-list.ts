@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ANY_COUNTRY } from "@/lib/cost-tiers";
 
 /**
  * Import format for a supplier price list.
@@ -24,6 +25,15 @@ export const priceListSchema = z.object({
       z.object({
         sku: z.string().min(1),
         name: z.string().optional(),
+        /**
+         * Other SKUs the same prices apply to.
+         *
+         * A supplier can quote a product under one code and ship it under another —
+         * Veyla's serum is quoted as FL2601612 and picked as FL2601024 — and the
+         * orders carry the shipping one. Naming the alias prices both from a single
+         * set of tiers, rather than keeping two copies that can drift apart.
+         */
+        aliases: z.array(z.string().min(1)).optional(),
         tiers: z.record(
           z.string(),
           z.union([
@@ -53,11 +63,48 @@ export function priceListToRows(list: PriceList): TierRow[] {
         ? totals.map((totalCost, index) => [index + 1, totalCost] as const)
         : Object.entries(totals).map(([quantity, totalCost]) => [Number(quantity), totalCost] as const);
       for (const [quantity, totalCost] of quoted) {
-        rows.push({ sku: product.sku, country: country.toUpperCase(), quantity, totalCost });
+        for (const sku of [product.sku, ...(product.aliases ?? [])]) {
+          rows.push({ sku, country: country.toUpperCase(), quantity, totalCost });
+        }
       }
     }
   }
   return rows;
+}
+
+/**
+ * Gives a product a catch-all price taken from one destination, so an order to a country
+ * the quote skips costs something rather than nothing.
+ *
+ * The quotes do not cover everywhere a store ships: eleven of Veyla's live destinations
+ * are missing from its serum sheet. Those lines were costing zero, which overstates
+ * profit by the whole of their fulfilment. Standing in the US price is wrong, but wrong
+ * by a few dollars rather than by all of it.
+ *
+ * The direction of the error is worth knowing: the US is among the cheapest destinations
+ * on both sheets and the uncovered ones skew expensive, so a fallback understates them.
+ *
+ * `isQuotedFor` still reports such a destination as unquoted — it only counts the
+ * catch-all as a real quote when a product has no country prices at all — so the invoice
+ * audit keeps saying "no country quote" instead of calling a correct charge a
+ * discrepancy. The fallback costs orders; it does not pretend to be a quote.
+ */
+export function withCountryFallback(list: PriceList, from = "US"): {
+  list: PriceList;
+  applied: string[];
+} {
+  const applied: string[] = [];
+  const products = list.products.map((product) => {
+    const source = Object.entries(product.tiers).find(
+      ([country]) => country.toUpperCase() === from.toUpperCase(),
+    );
+    // A product already priced for everywhere needs no stand-in, and one with no price
+    // for the source country has nothing to stand in with.
+    if (!source || product.tiers[ANY_COUNTRY]) return product;
+    applied.push([product.sku, ...(product.aliases ?? [])].join("/"));
+    return { ...product, tiers: { ...product.tiers, [ANY_COUNTRY]: source[1] } };
+  });
+  return { list: { ...list, products }, applied };
 }
 
 export function parsePriceList(
