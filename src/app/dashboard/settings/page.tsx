@@ -5,17 +5,20 @@ import { formatDate } from "@/lib/format";
 import { Card, Empty, Td, Th } from "@/components/ui";
 import {
   AdvisorKeyForm,
+  AdvisorModelForm,
   ConnectionsForm,
   FeeForm,
   SyncPanel,
 } from "@/components/settings-forms";
 import { describeAdvisorApiKey } from "@/lib/advisor/api-key";
+import { ADVISOR_MODELS, approximateTurnCost, getAdvisorModel } from "@/lib/advisor/models";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const store = await getActiveStore();
   const advisorKeySource = await describeAdvisorApiKey();
+  const advisorModel = await getAdvisorModel();
   const metaAccounts = await prisma.metaAdAccount.findMany({
     where: { storeId: store.id },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
@@ -64,8 +67,18 @@ export default async function SettingsPage() {
         />
       </Card>
 
-      <Card title="CFO">
+      <Card title="Advisors">
         <AdvisorKeyForm source={advisorKeySource} />
+        <AdvisorModelForm
+          current={advisorModel.id}
+          models={ADVISOR_MODELS.map((model) => ({
+            id: model.id,
+            label: model.label,
+            note: model.note,
+            perTurn: approximateTurnCost(model),
+            pricing: `$${model.inputPerMillion}/$${model.outputPerMillion} per million tokens`,
+          }))}
+        />
       </Card>
 
       <Card title="Fees">

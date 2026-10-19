@@ -4,17 +4,11 @@ import { hasValidSession } from "@/lib/session";
 import { findAdvisorAgent } from "@/lib/advisor/agents";
 import { advisorRange } from "@/lib/advisor/context";
 import { getAdvisorApiKey } from "@/lib/advisor/api-key";
+import { getAdvisorModel } from "@/lib/advisor/models";
 
 export const dynamic = "force-dynamic";
 /// Analysis of a quarter's trading takes longer than the default serverless slice.
 export const maxDuration = 300;
-
-/**
- * Opus, because this is the work the brief describes: reconciling figures, challenging
- * an assumption, and sizing a recommendation. A cheaper model would be a false economy
- * on a conversation that runs a few times a week and informs what gets spent.
- */
-const MODEL = "claude-opus-5-5";
 
 /**
  * Turns kept in the thread.
@@ -88,6 +82,7 @@ export async function POST(request: Request) {
     { role: "user", content: `${snapshot}\n\n---\n\n${message}` },
   ];
 
+  const model = await getAdvisorModel();
   const client = new Anthropic({ apiKey });
   const encoder = new TextEncoder();
 
@@ -99,16 +94,19 @@ export async function POST(request: Request) {
 
       try {
         const turn = client.beta.messages.stream({
-          model: MODEL,
+          model: model.id,
           max_tokens: 32_000,
           // Reasoning is the point here, and the figures deserve it. Summarised so the
           // operator can see the working rather than a long pause.
           thinking: { type: "adaptive", display: "summarized" },
           output_config: { effort: "high" },
-          // A safety decline on a finance question would otherwise just stop; the API
-          // re-runs it on a fallback model inside the same call.
-          betas: ["server-side-fallback-2026-07-01"],
-          fallbacks: "default",
+          // A safety decline on a finance question would otherwise just stop; where the
+          // model supports it the API re-runs the request on a fallback inside the same
+          // call. Haiku does not, and sending it the parameter is an error, so the
+          // choice of model decides whether it goes at all.
+          ...(model.serverSideFallback
+            ? { betas: ["server-side-fallback-2026-07-01" as const], fallbacks: "default" as const }
+            : {}),
           system: [
             {
               type: "text",
@@ -144,7 +142,12 @@ export async function POST(request: Request) {
             data: { storeId, agent: agent.key, role: "assistant", content: answer },
           });
         }
-        send({ type: "done", usage: final.usage.input_tokens + final.usage.output_tokens });
+        send({
+          type: "done",
+          usage: final.usage.input_tokens + final.usage.output_tokens,
+          // The model that actually served it, which a refusal fallback can change.
+          model: final.model,
+        });
       } catch (error) {
         // The question is already saved, so a failed turn leaves the thread showing
         // what was asked rather than silently losing it.
@@ -154,7 +157,7 @@ export async function POST(request: Request) {
             : error instanceof Anthropic.RateLimitError
               ? "Rate limited by the API. Try again in a moment."
               : error instanceof Anthropic.APIError
-                ? `API error ${error.status}: ${error.message}`
+                ? `API error ${error.status} on ${model.label}: ${error.message}`
                 : error instanceof Error
                   ? error.message
                   : "Something went wrong.";

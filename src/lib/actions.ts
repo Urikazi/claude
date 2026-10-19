@@ -17,6 +17,7 @@ import {
   describeApiKeyProblem,
   setAdvisorApiKey,
 } from "@/lib/advisor/api-key";
+import { findAdvisorModel, setAdvisorModel } from "@/lib/advisor/models";
 import { findBundledPriceList } from "@/lib/bundled-price-lists";
 // Bundled at build time rather than read from disk, so it survives deployment to a
 // host that only ships the compiled output.
@@ -809,7 +810,7 @@ const changeSchema = z.object({
 });
 
 /**
- * Saves the Claude API key the CFO page uses.
+ * Saves the Claude API key both advisors use.
  *
  * Blank leaves the stored key alone, like every other secret on the settings page;
  * removing one is its own explicit action rather than something an empty field does
@@ -825,7 +826,7 @@ export async function updateAdvisorApiKey(
     await clearAdvisorApiKey();
     revalidatePath("/dashboard/settings");
     revalidatePath("/dashboard/advisor");
-    return { ok: true, message: "Key removed. The CFO page is switched off until another is set." };
+    return { ok: true, message: "Key removed. Both advisors are switched off until another is set." };
   }
 
   const key = formData.get("anthropicApiKey")?.toString().trim();
@@ -842,6 +843,21 @@ export async function updateAdvisorApiKey(
     message:
       "Key saved. It is stored in your database in plain text, like the other provider credentials here — so treat your DATABASE_URL as being as sensitive as the key.",
   };
+}
+
+/** Chooses the model both advisors run on. One choice for the whole dashboard. */
+export async function updateAdvisorModel(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const id = formData.get("model")?.toString() ?? "";
+  if (!(await setAdvisorModel(id))) {
+    return { ok: false, message: "That is not one of the available models." };
+  }
+  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/advisor", "layout");
+  return { ok: true, message: `Now using ${findAdvisorModel(id)?.label ?? id}.` };
 }
 
 /** Wipes one advisor's thread for one store. The other advisor's is untouched. */

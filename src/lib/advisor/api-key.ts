@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 
 /**
- * Where the CFO page gets its Claude API key.
+ * Where the advisor pages get their Claude API key.
  *
  * Two sources, environment first. An operator who sets ANTHROPIC_API_KEY on the host
  * keeps the key out of the database entirely, which is the safer arrangement and must

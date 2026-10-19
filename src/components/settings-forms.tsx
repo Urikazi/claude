@@ -5,6 +5,7 @@ import {
   resnapshotCosts,
   runSync,
   updateAdvisorApiKey,
+  updateAdvisorModel,
   updateFeeConfig,
   updateStoreSettings,
   type ActionState,
@@ -169,7 +170,7 @@ function MetaAccountsField({ initial }: { initial: MetaAccountRow[] }) {
 }
 
 /**
- * The Claude API key behind the CFO page.
+ * The Claude API key behind both advisors.
  *
  * Its own form rather than a field on the connections one: it is set once for the whole
  * dashboard rather than per store, and saving it alongside a store's credentials would
@@ -198,7 +199,7 @@ export function AdvisorKeyForm({ source }: { source: "environment" | "stored" | 
   return (
     <form action={formAction} className="space-y-3">
       <p className="text-xs text-muted">
-        Powers the CFO page. One key for the whole dashboard, not per store. Create one at{" "}
+        Powers both advisors. One key for the whole dashboard, not per store. Create one at{" "}
         <a
           href="https://console.anthropic.com/settings/keys"
           target="_blank"
@@ -241,6 +242,63 @@ export function AdvisorKeyForm({ source }: { source: "environment" | "stored" | 
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" disabled={pending} className={buttonClass}>
           {pending ? "Saving…" : removing ? "Remove key" : "Save key"}
+        </button>
+        <Status state={state} />
+      </div>
+    </form>
+  );
+}
+
+export type AdvisorModelOption = {
+  id: string;
+  label: string;
+  note: string;
+  perTurn: string;
+  pricing: string;
+};
+
+/** Which model the advisors run on. One choice for the whole dashboard. */
+export function AdvisorModelForm({
+  models,
+  current,
+}: {
+  models: AdvisorModelOption[];
+  current: string;
+}) {
+  const [state, formAction, pending] = useActionState<ActionState, FormData>(
+    updateAdvisorModel,
+    null,
+  );
+  const [chosen, setChosen] = useState(current);
+  const selected = models.find((model) => model.id === chosen) ?? models[0];
+
+  return (
+    <form action={formAction} className="space-y-3 border-t border-line pt-5">
+      <h3 className="text-sm font-semibold">Model</h3>
+      <Field label="Claude model">
+        <select
+          name="model"
+          value={chosen}
+          onChange={(event) => setChosen(event.target.value)}
+          className={inputClass}
+        >
+          {models.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.label} — {model.pricing}, about {model.perTurn} a question
+            </option>
+          ))}
+        </select>
+      </Field>
+      <p className="text-xs text-muted">{selected.note}</p>
+      <p className="text-xs text-muted">
+        The per-question figure is a guide, not a quote: a turn carries the brief, a live
+        snapshot of the store and the conversation so far, so it grows as a thread runs.
+        Set a hard ceiling under Billing → Limits in the Anthropic console rather than
+        relying on an estimate.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" disabled={pending || chosen === current} className={buttonClass}>
+          {pending ? "Saving…" : "Save model"}
         </button>
         <Status state={state} />
       </div>
