@@ -12,6 +12,11 @@ import { DEFAULT_TIME_ZONE, isValidTimeZone } from "@/lib/timezone";
 import { parsePriceList, priceListToRows, withCountryFallback } from "@/lib/price-list";
 import { parseCogsCsv, CogsCsvError } from "@/lib/supplier-cogs-csv";
 import * as metaAds from "@/lib/integrations/meta-ads";
+import {
+  clearAdvisorApiKey,
+  describeApiKeyProblem,
+  setAdvisorApiKey,
+} from "@/lib/advisor/api-key";
 import { findBundledPriceList } from "@/lib/bundled-price-lists";
 // Bundled at build time rather than read from disk, so it survives deployment to a
 // host that only ships the compiled output.
@@ -802,6 +807,42 @@ const changeSchema = z.object({
   category: z.enum(CHANGE_CATEGORIES.map((c) => c.value) as [string, ...string[]]),
   note: z.string().trim().max(2000).optional(),
 });
+
+/**
+ * Saves the Claude API key the CFO page uses.
+ *
+ * Blank leaves the stored key alone, like every other secret on the settings page;
+ * removing one is its own explicit action rather than something an empty field does
+ * by accident.
+ */
+export async function updateAdvisorApiKey(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+
+  if (formData.get("remove") === "on") {
+    await clearAdvisorApiKey();
+    revalidatePath("/dashboard/settings");
+    revalidatePath("/dashboard/advisor");
+    return { ok: true, message: "Key removed. The CFO page is switched off until another is set." };
+  }
+
+  const key = formData.get("anthropicApiKey")?.toString().trim();
+  if (!key) return { ok: false, message: "Paste a key, or tick remove to delete the stored one." };
+
+  const problem = describeApiKeyProblem(key);
+  if (problem) return { ok: false, message: problem };
+
+  await setAdvisorApiKey(key);
+  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/advisor");
+  return {
+    ok: true,
+    message:
+      "Key saved. It is stored in your database in plain text, like the other provider credentials here — so treat your DATABASE_URL as being as sensitive as the key.",
+  };
+}
 
 /** Wipes the CFO conversation for one store. The brief and the figures are unaffected. */
 export async function clearAdvisorThread(storeId: string): Promise<ActionState> {

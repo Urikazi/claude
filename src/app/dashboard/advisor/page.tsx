@@ -2,11 +2,13 @@ import { prisma } from "@/lib/db";
 import { getActiveStore } from "@/lib/store";
 import { AdvisorChat } from "@/components/advisor-chat";
 import { Card } from "@/components/ui";
+import { describeAdvisorApiKey } from "@/lib/advisor/api-key";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdvisorPage() {
   const store = await getActiveStore();
+  const keySource = await describeAdvisorApiKey();
   const turns = await prisma.advisorMessage.findMany({
     where: { storeId: store.id },
     orderBy: { createdAt: "asc" },
@@ -27,7 +29,7 @@ export default async function AdvisorPage() {
         <AdvisorChat
           storeId={store.id}
           storeName={store.name}
-          configured={Boolean(process.env.ANTHROPIC_API_KEY)}
+          configured={keySource !== "missing"}
           initial={turns.map((turn) => ({
             id: turn.id,
             role: turn.role,

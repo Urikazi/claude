@@ -129,9 +129,12 @@ export function AdvisorChat({
     <div className="space-y-4">
       {!configured ? (
         <div className="rounded-lg border border-neg/40 bg-neg/5 p-3 text-xs text-body">
-          <strong>ANTHROPIC_API_KEY is not set.</strong> Add it to your environment and
-          redeploy. It is read from the environment rather than stored in the database, so it
-          never sits in there in plain text alongside your Shopify and Meta credentials.
+          <strong>No Claude API key is set.</strong> Paste one under{" "}
+          <a href="/dashboard/settings" className="underline">
+            Store settings
+          </a>
+          , or set <code>ANTHROPIC_API_KEY</code> on your host and redeploy — the environment
+          wins where both are present, and keeps the key out of your database.
         </div>
       ) : null}
 

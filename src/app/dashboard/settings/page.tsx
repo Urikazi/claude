@@ -3,12 +3,19 @@ import { getActiveStore } from "@/lib/store";
 import { toFeeRates } from "@/lib/fees";
 import { formatDate } from "@/lib/format";
 import { Card, Empty, Td, Th } from "@/components/ui";
-import { ConnectionsForm, FeeForm, SyncPanel } from "@/components/settings-forms";
+import {
+  AdvisorKeyForm,
+  ConnectionsForm,
+  FeeForm,
+  SyncPanel,
+} from "@/components/settings-forms";
+import { describeAdvisorApiKey } from "@/lib/advisor/api-key";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const store = await getActiveStore();
+  const advisorKeySource = await describeAdvisorApiKey();
   const metaAccounts = await prisma.metaAdAccount.findMany({
     where: { storeId: store.id },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
@@ -55,6 +62,10 @@ export default async function SettingsPage() {
             hasPaypalSecret: Boolean(store.paypalClientSecret),
           }}
         />
+      </Card>
+
+      <Card title="CFO">
+        <AdvisorKeyForm source={advisorKeySource} />
       </Card>
 
       <Card title="Fees">

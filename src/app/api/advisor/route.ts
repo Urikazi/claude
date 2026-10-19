@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { hasValidSession } from "@/lib/session";
 import { ADVISOR_SYSTEM_PROMPT } from "@/lib/advisor/system-prompt";
 import { advisorRange, buildAdvisorContext } from "@/lib/advisor/context";
+import { getAdvisorApiKey } from "@/lib/advisor/api-key";
 
 export const dynamic = "force-dynamic";
 /// Analysis of a quarter's trading takes longer than the default serverless slice.
@@ -52,11 +53,12 @@ export async function POST(request: Request) {
   const store = await prisma.store.findUnique({ where: { id: storeId } });
   if (!store) return Response.json({ error: "Unknown store." }, { status: 404 });
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const { key: apiKey } = await getAdvisorApiKey();
+  if (!apiKey) {
     return Response.json(
       {
         error:
-          "ANTHROPIC_API_KEY is not set. Add it to your environment (Vercel → Settings → Environment Variables) and redeploy. It is read from the environment rather than stored in the database, so it never sits in there in plain text.",
+          "No Claude API key is set. Paste one under Store settings, or set ANTHROPIC_API_KEY on the host and redeploy — the environment wins where both are present, and keeps the key out of the database.",
       },
       { status: 503 },
     );
@@ -84,7 +86,7 @@ export async function POST(request: Request) {
     { role: "user", content: `${snapshot}\n\n---\n\n${message}` },
   ];
 
-  const client = new Anthropic();
+  const client = new Anthropic({ apiKey });
   const encoder = new TextEncoder();
 
   const body = new ReadableStream({
@@ -146,7 +148,7 @@ export async function POST(request: Request) {
         // what was asked rather than silently losing it.
         const message =
           error instanceof Anthropic.AuthenticationError
-            ? "ANTHROPIC_API_KEY was rejected. Check the key in your environment."
+            ? "That API key was rejected by Anthropic. Check it under Store settings, and that the account has credit."
             : error instanceof Anthropic.RateLimitError
               ? "Rate limited by the API. Try again in a moment."
               : error instanceof Anthropic.APIError

@@ -4,6 +4,7 @@ import { useActionState, useState, useTransition } from "react";
 import {
   resnapshotCosts,
   runSync,
+  updateAdvisorApiKey,
   updateFeeConfig,
   updateStoreSettings,
   type ActionState,
@@ -164,6 +165,86 @@ function MetaAccountsField({ initial }: { initial: MetaAccountRow[] }) {
         + Add ad account
       </button>
     </div>
+  );
+}
+
+/**
+ * The Claude API key behind the CFO page.
+ *
+ * Its own form rather than a field on the connections one: it is set once for the whole
+ * dashboard rather than per store, and saving it alongside a store's credentials would
+ * imply otherwise.
+ */
+export function AdvisorKeyForm({ source }: { source: "environment" | "stored" | "missing" }) {
+  const [state, formAction, pending] = useActionState<ActionState, FormData>(
+    updateAdvisorApiKey,
+    null,
+  );
+  const [removing, setRemoving] = useState(false);
+
+  if (source === "environment") {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-pos">Set from the environment.</p>
+        <p className="text-xs text-muted">
+          <code>ANTHROPIC_API_KEY</code> is set on the host, which is the safer place for it —
+          the key never reaches your database. A key pasted here would be ignored while that
+          variable is set, so this form stays out of your way.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <form action={formAction} className="space-y-3">
+      <p className="text-xs text-muted">
+        Powers the CFO page. One key for the whole dashboard, not per store. Create one at{" "}
+        <a
+          href="https://console.anthropic.com/settings/keys"
+          target="_blank"
+          rel="noreferrer"
+          className="text-accent underline"
+        >
+          console.anthropic.com
+        </a>{" "}
+        — it starts <code>sk-ant-</code>, and the account needs credit. This is billed
+        separately from a Claude subscription.
+      </p>
+      <Field label="Claude API key">
+        <input
+          name="anthropicApiKey"
+          type="password"
+          autoComplete="off"
+          placeholder={source === "stored" ? "•••••••• (leave blank to keep)" : "sk-ant-..."}
+          disabled={removing}
+          className={inputClass}
+        />
+      </Field>
+      <p className="text-xs text-muted">
+        Stored in your database in plain text, like the Shopify and Meta credentials above, so
+        your <code>DATABASE_URL</code> is as sensitive as this key — and this one can spend
+        money. Setting <code>ANTHROPIC_API_KEY</code> on your host instead avoids that, and
+        takes precedence over anything saved here.
+      </p>
+      {source === "stored" ? (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="remove"
+            checked={removing}
+            onChange={(event) => setRemoving(event.target.checked)}
+            className="h-4 w-4 rounded border-line"
+          />
+          <span>Remove the stored key</span>
+        </label>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" disabled={pending} className={buttonClass}>
+          {pending ? "Saving…" : removing ? "Remove key" : "Save key"}
+        </button>
+        <Status state={state} />
+      </div>
+    </form>
   );
 }
 
