@@ -1,11 +1,320 @@
 {
   "source": "Veyla supplier quote 2026-10-17 (customised serum FL2601612 plus add-ons); FL2601252 from the 2026-07-29 quote",
   "currency": "USD",
-  "note": "FL2601612 is the customised serum quoted 2026-10-17 (MOQ 10,000, made to order, no stock). FL2601574 and FL2601148 are quoted flat per unit for every destination — the sheet gives them no country column — so they carry a single catch-all tier. FL2601252 is the retired serum, kept so orders shipped before 2026-09-21 still cost. FL2601024, the serum actually shipping since then, has never been quoted and is deliberately absent rather than guessed at.",
+  "note": "FL2601024 and FL2601612 are the same serum at the same cost — the supplier quotes it under FL2601612 and ships it under FL2601024 — so both carry the 2026-10-17 tiers. FL2601574 and FL2601148 are quoted flat per unit for every destination, the sheet giving them no country column, so each is one catch-all tier. FL2601252 is the serum retired on 2026-09-21, kept so earlier orders still cost. Orders between 2026-09-21 and the quote date were billed at the rates preceding it, which ran about 10% higher.",
   "products": [
     {
+      "sku": "FL2601024",
+      "name": "Veyla Hair Growth Serum (shipping SKU, same product and cost as FL2601612)",
+      "tiers": {
+        "US": [
+          6.8,
+          9.95,
+          13.2,
+          16.45,
+          19.6,
+          23.1,
+          26.65,
+          30.15
+        ],
+        "GB": [
+          5.8,
+          8.45,
+          10.95,
+          13.45,
+          15.95,
+          18.45,
+          21.4,
+          23.95
+        ],
+        "CA": [
+          6.65,
+          9.6,
+          13.3,
+          16.4,
+          19.5,
+          22.6,
+          27.4,
+          30.7
+        ],
+        "SG": [
+          5.5,
+          8.1,
+          10.7,
+          13.3,
+          15.9,
+          18.5,
+          21.1,
+          23.7
+        ],
+        "AE": [
+          7.85,
+          11.25,
+          14.85,
+          18.25,
+          21.7,
+          25.25,
+          28.7,
+          32.25
+        ],
+        "ES": [
+          5.85,
+          10.0,
+          14.1,
+          18.25,
+          22.4,
+          26.55,
+          30.7,
+          34.85
+        ],
+        "IL": [
+          6.45,
+          9.6,
+          12.75,
+          16.9,
+          20.1,
+          23.35,
+          26.55,
+          29.75
+        ],
+        "DE": [
+          8.15,
+          11.25,
+          14.3,
+          18.65,
+          21.75,
+          24.8,
+          26.85,
+          29.75
+        ],
+        "PT": [
+          8.85,
+          12.4,
+          15.9,
+          19.6,
+          23.0,
+          26.4,
+          29.8,
+          33.2
+        ],
+        "SA": [
+          6.15,
+          9.9,
+          13.65,
+          17.4,
+          21.15,
+          24.9,
+          28.65,
+          32.4
+        ],
+        "MX": [
+          7.35,
+          12.35,
+          16.85,
+          22.05,
+          26.7,
+          31.35,
+          36.95,
+          41.65
+        ],
+        "IS": [
+          9.15,
+          13.2,
+          17.25,
+          21.3,
+          25.35,
+          29.4,
+          33.5,
+          37.55
+        ],
+        "GR": [
+          9.45,
+          12.45,
+          15.45,
+          18.5,
+          21.5,
+          24.5,
+          27.5,
+          30.5
+        ],
+        "HK": [
+          3.4,
+          4.95,
+          6.5,
+          8.05,
+          9.6,
+          11.15,
+          12.7,
+          14.25
+        ],
+        "AU": [
+          9.15,
+          12.55,
+          15.9,
+          19.35
+        ],
+        "AU-REMOTE": [
+          13.4,
+          17.3,
+          21.2,
+          27.15,
+          31.05,
+          34.95,
+          39.25,
+          43.15
+        ],
+        "KW": [
+          17.7,
+          21.75,
+          39.45,
+          43.5,
+          61.2,
+          65.25
+        ],
+        "BN": [
+          5.55,
+          8.35,
+          11.1,
+          13.9
+        ],
+        "PF": [
+          10.65,
+          19.8,
+          28.95,
+          38.1
+        ],
+        "JP": [
+          7.7,
+          9.6,
+          11.5,
+          13.45
+        ],
+        "EE": [
+          6.6,
+          9.9,
+          13.15
+        ],
+        "NL": {
+          "1": 4.85,
+          "2": 7.95,
+          "3": 11.1,
+          "5": 18.65
+        },
+        "PE": [
+          9.25,
+          17.2,
+          25.1
+        ],
+        "ZA": [
+          9.5,
+          14.7,
+          19.9,
+          25.05
+        ],
+        "HU": [
+          4.9,
+          8.25,
+          11.65
+        ],
+        "PL": [
+          4.2,
+          7.45,
+          10.75,
+          13.75,
+          16.95,
+          20.15,
+          22.9,
+          26.05
+        ],
+        "HR": [
+          8.7,
+          12.5,
+          16.35,
+          20.2,
+          24.0
+        ],
+        "SK": [
+          5.45,
+          8.85,
+          12.2,
+          15.35,
+          18.55
+        ],
+        "CZ": [
+          4.65,
+          7.95,
+          11.3,
+          14.6,
+          17.85
+        ],
+        "CH": [
+          8.5,
+          12.6,
+          16.7,
+          19.05,
+          22.7
+        ],
+        "IT": [
+          4.95,
+          7.85,
+          10.75,
+          14.0,
+          16.9
+        ],
+        "FI": [
+          7.75,
+          11.6,
+          15.4,
+          19.25,
+          23.1
+        ],
+        "MO": [
+          7.1,
+          10.5,
+          13.85,
+          17.25
+        ],
+        "LV": [
+          6.6,
+          9.9,
+          13.15,
+          16.4
+        ],
+        "GE": [
+          6.05,
+          10.05,
+          14.0,
+          18.0
+        ],
+        "RO": [
+          16.55,
+          20.2,
+          23.9,
+          27.6
+        ],
+        "SE": [
+          6.05,
+          9.5,
+          12.95,
+          15.8
+        ],
+        "CO": [
+          7.45,
+          12.5,
+          17.55,
+          22.6
+        ],
+        "QA": [
+          9.6,
+          17.55,
+          25.45,
+          33.4
+        ]
+      }
+    },
+    {
       "sku": "FL2601612",
-      "name": "Veyla Hair Growth Serum (customised)",
+      "name": "Veyla Hair Growth Serum (customised, quoted SKU)",
       "tiers": {
         "US": [
           6.8,
