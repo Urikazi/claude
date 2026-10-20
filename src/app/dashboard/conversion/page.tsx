@@ -119,8 +119,12 @@ export default async function ConversionPage({
               label="Revenue from new customers"
               value={formatMoney(totals.newRevenue, store.currency)}
               hint={
-                totals.revenue > 0
-                  ? `${((totals.newRevenue / totals.revenue) * 100).toFixed(1)}% of all revenue`
+                totals.newOrders > 0
+                  ? `${formatMoney(totals.newAov, store.currency)} AOV${
+                      totals.revenue > 0
+                        ? ` · ${((totals.newRevenue / totals.revenue) * 100).toFixed(1)}% of all revenue`
+                        : ""
+                    }`
                   : undefined
               }
             />
@@ -145,7 +149,11 @@ export default async function ConversionPage({
             <Stat
               label="Revenue"
               value={formatMoney(totals.revenue, store.currency)}
-              hint={`${formatNumber(totals.orders)} orders, net of refunds`}
+              hint={
+                totals.orders > 0
+                  ? `${formatMoney(totals.aov, store.currency)} AOV over ${formatNumber(totals.orders)} orders, net of refunds`
+                  : `${formatNumber(totals.orders)} orders, net of refunds`
+              }
             />
           </>
         )}
@@ -162,10 +170,11 @@ export default async function ConversionPage({
         </p>
       ) : null}
 
-      <Card title="Revenue by customer type">
+      <Card title="Revenue and AOV by customer type">
         <p className="mb-4 text-sm text-muted">
           Every order counts towards revenue, repeat buyers included. This splits the same
-          total the P&amp;L reports — it does not filter anything out of it.
+          total the P&amp;L reports — it does not filter anything out of it. AOV is that
+          revenue over those orders, so each column divides by its own order count.
         </p>
         <div className="grid gap-3 sm:grid-cols-3">
           <Stat
@@ -202,6 +211,69 @@ export default async function ConversionPage({
             }
           />
         </div>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <Stat
+            label="AOV"
+            value={totals.orders > 0 ? formatMoney(totals.aov, store.currency) : "—"}
+            hint={
+              totals.orders > 0
+                ? `${formatNumber(totals.orders)} orders`
+                : "No orders in range"
+            }
+          />
+          <Stat
+            label="New customer AOV"
+            value={
+              report.customersKnown && totals.newOrders > 0
+                ? formatMoney(totals.newAov, store.currency)
+                : "—"
+            }
+            hint={
+              !report.customersKnown
+                ? "Needs customer data"
+                : totals.newOrders > 0
+                  ? `${formatNumber(totals.newOrders)} first orders`
+                  : "No first orders in range"
+            }
+          />
+          <Stat
+            label="Returning AOV"
+            value={
+              report.customersKnown && totals.returningOrders > 0
+                ? formatMoney(totals.returningAov, store.currency)
+                : "—"
+            }
+            hint={
+              !report.customersKnown
+                ? "Needs customer data"
+                : totals.returningOrders > 0
+                  ? `${formatNumber(totals.returningOrders)} repeat orders`
+                  : "No repeat orders in range"
+            }
+          />
+        </div>
+
+        {totals.visits > 0 && totals.orders > 0 ? (
+          <p className="mt-4 text-xs text-muted">
+            <span className="font-semibold text-fg">
+              {formatMoney(totals.revenuePerVisit, store.currency)} per {report.source === "sessions" ? "session" : "click"}
+            </span>{" "}
+            — conversion and basket size in one figure ({pct(totals.cvr)} of{" "}
+            {formatNumber(totals.visits)} {denominator} ×{" "}
+            {formatMoney(totals.aov, store.currency)}). A change has to lift this to be
+            worth keeping: a rate that rises while baskets shrink has not gained you
+            anything.
+          </p>
+        ) : null}
+
+        {report.customersKnown && totals.newOrders > 0 && totals.returningOrders > 0 ? (
+          <p className="mt-4 text-xs text-muted">
+            {totals.returningAov >= totals.newAov
+              ? `A repeat basket is ${formatMoney(totals.returningAov - totals.newAov, store.currency)} larger than a first one — ${((totals.returningAov / totals.newAov - 1) * 100).toFixed(0)}% more. That gap is what a second purchase is worth before any acquisition cost.`
+              : `A first basket is ${formatMoney(totals.newAov - totals.returningAov, store.currency)} larger than a repeat one — unusual, and normally a sign that the offer new buyers take is a bigger bundle than the one they come back for.`}
+          </p>
+        ) : null}
       </Card>
 
       <Card title="Conversion by day">

@@ -36,6 +36,23 @@ export type ConversionTotals = {
   revenue: number;
   newRevenue: number;
   returningRevenue: number;
+  /**
+   * Revenue over orders, net of refunds.
+   *
+   * Split the same way as revenue because the two halves rarely match: a first order
+   * is usually a smaller basket than a repeat one, so a single blended figure hides
+   * which direction a change moved.
+   */
+  aov: number;
+  newAov: number;
+  returningAov: number;
+  /**
+   * Revenue over visits — conversion and basket size in one number.
+   *
+   * The figure a change has to improve to be worth keeping. A rate that rises while
+   * baskets shrink is not an improvement, and comparing conversion alone cannot say so.
+   */
+  revenuePerVisit: number;
 };
 
 export type ConversionReport = {
@@ -56,6 +73,10 @@ export type ConversionReport = {
 
 const rate = (numerator: number, denominator: number): number =>
   denominator > 0 ? (numerator / denominator) * 100 : 0;
+
+/** Zero where there is nothing to divide by: an average of no orders is not zero, but
+ * it has no value either, and the page shows a dash for it rather than a figure. */
+const perOrder = (total: number, count: number): number => (count > 0 ? total / count : 0);
 
 export async function buildConversionReport(
   storeId: string,
@@ -157,6 +178,12 @@ export async function buildConversionReport(
       revenue: round2(revenue),
       newRevenue: round2(newRevenue),
       returningRevenue: round2(revenue - newRevenue),
+      aov: round2(perOrder(revenue, totals.orders)),
+      newAov: round2(perOrder(newRevenue, totals.newOrders)),
+      returningAov: round2(
+        perOrder(revenue - newRevenue, totals.orders - totals.newOrders),
+      ),
+      revenuePerVisit: round2(perOrder(revenue, totals.visits)),
     },
   };
 }
