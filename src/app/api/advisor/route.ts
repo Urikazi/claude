@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/db";
 import { hasValidSession } from "@/lib/session";
-import { findAdvisorAgent } from "@/lib/advisor/agents";
+import { advisorAvailableFor, findAdvisorAgent } from "@/lib/advisor/agents";
 import { advisorRange } from "@/lib/advisor/context";
 import { getAdvisorApiKey } from "@/lib/advisor/api-key";
 import { getAdvisorModel } from "@/lib/advisor/models";
@@ -57,6 +57,14 @@ export async function POST(request: Request) {
 
   const store = await prisma.store.findUnique({ where: { id: storeId } });
   if (!store) return Response.json({ error: "Unknown store." }, { status: 404 });
+  // Hiding the chat is not the same as closing it: an advisor written for one brand
+  // would answer about another's catalogue if a request simply named it.
+  if (!advisorAvailableFor(agent, store.name)) {
+    return Response.json(
+      { error: `${agent.label} is only available for ${agent.onlyForStore}.` },
+      { status: 404 },
+    );
+  }
 
   const { key: apiKey } = await getAdvisorApiKey();
   if (!apiKey) {

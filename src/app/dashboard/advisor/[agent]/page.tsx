@@ -5,7 +5,7 @@ import { getActiveStore } from "@/lib/store";
 import { AdvisorChat } from "@/components/advisor-chat";
 import { Card } from "@/components/ui";
 import { describeAdvisorApiKey } from "@/lib/advisor/api-key";
-import { findAdvisorAgent } from "@/lib/advisor/agents";
+import { advisorAvailableFor, findAdvisorAgent } from "@/lib/advisor/agents";
 import { getAdvisorModel } from "@/lib/advisor/models";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +20,8 @@ export default async function AdvisorPage({
   if (!agent) notFound();
 
   const store = await getActiveStore();
+  if (!advisorAvailableFor(agent, store.name)) notFound();
+
   const [keySource, model, turns] = await Promise.all([
     describeAdvisorApiKey(),
     getAdvisorModel(),

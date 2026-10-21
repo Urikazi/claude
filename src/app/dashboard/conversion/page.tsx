@@ -5,6 +5,15 @@ import { todayInZone } from "@/lib/timezone";
 import { analyzeChanges, buildConversionReport, type ChangeImpact } from "@/lib/conversion";
 import { CHANGE_CATEGORIES } from "@/lib/change-categories";
 import { Card, Empty, Stat, Td, Th } from "@/components/ui";
+import { AdvisorChat } from "@/components/advisor-chat";
+import {
+  advisorAvailableFor,
+  findAdvisorAgent,
+  type AdvisorAgent,
+} from "@/lib/advisor/agents";
+import { describeAdvisorApiKey } from "@/lib/advisor/api-key";
+import { getAdvisorModel } from "@/lib/advisor/models";
+import { prisma } from "@/lib/db";
 import { RangePicker } from "@/components/range-picker";
 import { ConversionChart } from "@/components/conversion-chart";
 import { ChangeLogForm } from "@/components/change-log-form";
@@ -17,6 +26,20 @@ const CATEGORY_LABELS = new Map<string, string>(
 );
 
 const pct = (value: number) => `${value.toFixed(2)}%`;
+
+/** The key, the model and the thread an embedded advisor needs to render. */
+async function loadAdvisor(storeId: string, agent: AdvisorAgent) {
+  const [keySource, model, turns] = await Promise.all([
+    describeAdvisorApiKey(),
+    getAdvisorModel(),
+    prisma.advisorMessage.findMany({
+      where: { storeId, agent: agent.key },
+      orderBy: { createdAt: "asc" },
+      take: 200,
+    }),
+  ]);
+  return { agent, keySource, model, turns };
+}
 
 export default async function ConversionPage({
   searchParams,
@@ -31,6 +54,19 @@ export default async function ConversionPage({
     buildConversionReport(store.id, range),
     analyzeChanges(store.id, store.timezone),
   ]);
+
+  /**
+   * The CRO advisor, where this store has one.
+   *
+   * It sits on this page rather than in the sidebar because its evidence is here: the
+   * funnel above it and the measured change log below it are what it reasons from, so
+   * a question about a conversion number is asked beside the number.
+   */
+  const croAgent = findAdvisorAgent("cro");
+  const cro =
+    croAgent && advisorAvailableFor(croAgent, store.name)
+      ? await loadAdvisor(store.id, croAgent)
+      : null;
 
   const { totals } = report;
   const denominator = report.source === "sessions" ? "sessions" : "ad clicks";
@@ -338,6 +374,31 @@ export default async function ConversionPage({
           <Empty>Nothing logged yet. Record your next edit above and it will be measured.</Empty>
         )}
       </Card>
+
+      {cro ? (
+        <Card title={cro.agent.label}>
+          <p className="mb-3 text-sm text-muted">
+            {cro.agent.blurb} Running on {cro.model.label}.{" "}
+            <Link href="/dashboard/settings" className="underline">
+              Change the model
+            </Link>
+          </p>
+          <AdvisorChat
+            storeId={store.id}
+            storeName={store.name}
+            agent={cro.agent.key}
+            agentLabel={cro.agent.label}
+            suggestions={cro.agent.suggestions}
+            days={cro.agent.days}
+            configured={cro.keySource !== "missing"}
+            initial={cro.turns.map((turn) => ({
+              id: turn.id,
+              role: turn.role,
+              content: turn.content,
+            }))}
+          />
+        </Card>
+      ) : null}
     </div>
   );
 }
