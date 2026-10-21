@@ -213,6 +213,92 @@ export async function fetchDailySpend(
   return rows;
 }
 
+/**
+ * What Meta's numeric account_status means.
+ *
+ * A disabled or unsettled account returns no insights and no error worth the name, so
+ * a sync against one looks like an account that simply did not spend. Naming the state
+ * is the difference between "nothing came back" and "Meta has switched this off".
+ */
+const ACCOUNT_STATUS: Record<number, string> = {
+  1: "active",
+  2: "disabled by Meta",
+  3: "unsettled — an unpaid balance is blocking it",
+  7: "pending risk review",
+  8: "pending settlement",
+  9: "in grace period",
+  100: "pending closure",
+  101: "closed",
+};
+
+export function describeAccountStatus(status: number): string {
+  return ACCOUNT_STATUS[status] ?? `status ${status}`;
+}
+
+/**
+ * Checks one account end to end: that the token can read the account, and that it can
+ * read its insights.
+ *
+ * The two are separate permissions and fail separately. A token can name an account
+ * perfectly well and still be refused its spend, which is the case that looks like an
+ * account quietly contributing nothing.
+ */
+export async function testAccount(
+  credentials: MetaCredentials,
+): Promise<{ ok: boolean; account: string | null; detail: string }> {
+  let described: { name: string; currency: string; account_status: number };
+  try {
+    described = await verifyCredentials(credentials);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      account: null,
+      // A thrown fetch is the network, not Meta: it carries no status and no body, and
+      // reporting it as a refusal would send someone to the wrong settings screen.
+      detail: message.startsWith("Meta Ads:")
+        ? message
+        : `Could not reach Meta at all (${message}). This is the connection rather than the account — nothing in your Meta settings will change it.`,
+    };
+  }
+
+  const label = `${described.name} (${described.currency}, ${describeAccountStatus(described.account_status)})`;
+  // Only status 1 is a live account. Anything else still answers questions about itself
+  // while returning no spend, so an empty result reads as "did not advertise" when the
+  // truth is that Meta has stopped the account.
+  const live = described.account_status === 1;
+  if (!live) {
+    return {
+      ok: false,
+      account: described.name,
+      detail: `${label}. Meta is not running this account, so it has no spend to sync whatever the token can see.`,
+    };
+  }
+  // Reading the account is not the same permission as reading its spend, so prove the
+  // part the sync actually depends on.
+  try {
+    const since = new Date(Date.now() - 7 * 86_400_000);
+    const rows = await fetchDailySpend(credentials, since, new Date());
+    const spend = rows.reduce((sum, row) => sum + row.spend, 0);
+    return {
+      ok: true,
+      account: described.name,
+      detail:
+        rows.length > 0
+          ? `${label}. Read ${rows.length} campaign-days over the last 7 days, ${spend.toFixed(2)} ${described.currency} of spend.`
+          : `${label}. Readable, but Meta returned no campaign rows for the last 7 days — this account has no spend to sync in that window.`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      account: described.name,
+      detail: `${label}. The account reads fine, but its insights were refused: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+}
+
 export async function verifyCredentials(credentials: MetaCredentials) {
   const account = normalizeAccountId(credentials.adAccountId);
   const params = new URLSearchParams({

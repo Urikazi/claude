@@ -8,6 +8,7 @@ import {
   updateAdvisorModel,
   updateFeeConfig,
   updateStoreSettings,
+  testMetaAdAccount,
   type ActionState,
 } from "@/lib/actions";
 import { Card, Field, buttonClass, ghostButtonClass, inputClass } from "@/components/ui";
@@ -65,6 +66,35 @@ export type MetaAccountRow = {
   /** Whether a token is already stored, so the field can say "leave blank to keep". */
   hasToken: boolean;
 };
+
+/**
+ * Asks Meta about one saved account and shows the answer.
+ *
+ * Only offered for a row that is already stored: there is nothing to test until a
+ * token has been saved, and testing what is typed into the box would need the key to
+ * travel somewhere it does not need to go.
+ */
+function TestAccountButton({ id }: { id: string }) {
+  const [pending, start] = useTransition();
+  const [result, setResult] = useState<ActionState>(null);
+  return (
+    <>
+      <button
+        type="button"
+        disabled={pending}
+        className={ghostButtonClass}
+        onClick={() => start(async () => setResult(await testMetaAdAccount(id)))}
+      >
+        {pending ? "Asking Meta…" : "Test"}
+      </button>
+      {result ? (
+        <p className={`basis-full text-xs ${result.ok ? "text-pos" : "text-neg"}`}>
+          {result.message}
+        </p>
+      ) : null}
+    </>
+  );
+}
 
 /** A client-side key for rows that have no database id yet. */
 let nextDraftKey = 0;
@@ -151,13 +181,16 @@ function MetaAccountsField({ initial }: { initial: MetaAccountRow[] }) {
                 </span>
               </span>
             </label>
-            <button
-              type="button"
-              onClick={() => remove(row.key)}
-              className={ghostButtonClass}
-            >
-              Remove
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {row.id ? <TestAccountButton id={row.id} /> : null}
+              <button
+                type="button"
+                onClick={() => remove(row.key)}
+                className={ghostButtonClass}
+              >
+                Remove
+              </button>
+            </div>
           </div>
         </div>
       ))}
@@ -408,7 +441,9 @@ export function ConnectionsForm({ store }: { store: StoreSettings }) {
           Create a Meta app with the Marketing API product and generate a long-lived token holding
           the <code>ads_read</code> permission. Add an account per ad account you spend from — all
           of their spend lands on this store&rsquo;s P&amp;L, and each is fetched with its own
-          token, so one that stops working does not take the others down with it.
+          token, so one that stops working does not take the others down with it. If one
+          account&rsquo;s spend is missing, <strong>Test</strong> asks Meta about that account on
+          its own and reports exactly what it says.
         </p>
         <MetaAccountsField initial={store.metaAccounts} />
         <label className="flex items-start gap-2 text-sm">

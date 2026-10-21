@@ -853,6 +853,31 @@ export async function updateAdvisorApiKey(
   };
 }
 
+/**
+ * Asks Meta about one connected ad account and reports what it says.
+ *
+ * Built because a store running two accounts and seeing one account's spend has no way
+ * to tell which of several things happened: a refused token, an account Meta has
+ * disabled, insights denied separately from the account itself, or an account that
+ * genuinely did not spend. The sync reports the first failure it meets and moves on;
+ * this asks one account directly and says what came back.
+ */
+export async function testMetaAdAccount(id: string): Promise<ActionState> {
+  await assertSession();
+  const account = await prisma.metaAdAccount.findUnique({ where: { id } });
+  if (!account) return { ok: false, message: "That ad account is no longer connected." };
+
+  const name = account.label?.trim() || account.accountId;
+  const result = await metaAds.testAccount({
+    adAccountId: account.accountId,
+    accessToken: account.accessToken,
+  });
+  return {
+    ok: result.ok,
+    message: `${name}: ${result.detail}`,
+  };
+}
+
 /** Chooses the model both advisors run on. One choice for the whole dashboard. */
 export async function updateAdvisorModel(
   _prev: ActionState,
