@@ -200,29 +200,52 @@ export async function fetchInsightsSample(
 
 type InsightsLevel = "campaign" | "account";
 
+const COST_FIELDS = "spend,impressions,clicks";
+const ACTION_FIELDS = "actions,action_values,purchase_roas";
+
 /**
- * One page-walked insights query.
+ * One shape of insights request.
  *
- * Split out of `fetchDailySpend` because the same days have to be asked for twice at
- * different breakdowns: Meta will hand back a campaign split whose cost columns are all
- * zero and an account-level total for those same days that is not.
+ * Meta does not answer "what did this account spend" the same way depending on how it
+ * is asked, and an account whose cost columns come back zeroed at one breakdown will
+ * often report them at another. These are the shapes worth trying, cheapest and most
+ * detailed first.
  */
+type SpendQuery = { level: InsightsLevel; withActions: boolean };
+
+const SPEND_QUERIES: SpendQuery[] = [
+  { level: "campaign", withActions: true },
+  { level: "campaign", withActions: false },
+  { level: "account", withActions: true },
+  { level: "account", withActions: false },
+];
+
+function describeQuery(query: SpendQuery): string {
+  const level = query.level === "campaign" ? "per campaign" : "account total";
+  return query.withActions ? level : `${level}, cost columns only`;
+}
+
+/** One page-walked insights query. */
 async function requestInsights(
   credentials: MetaCredentials,
-  level: InsightsLevel,
+  query: SpendQuery,
   since: Date,
   until: Date,
 ): Promise<InsightRow[]> {
   const account = normalizeAccountId(credentials.adAccountId);
+  const fields = [
+    query.level === "campaign" ? "campaign_id,campaign_name" : null,
+    COST_FIELDS,
+    query.withActions ? ACTION_FIELDS : null,
+  ]
+    .filter(Boolean)
+    .join(",");
   const params = new URLSearchParams({
     access_token: credentials.accessToken,
-    level,
+    level: query.level,
     time_increment: "1",
     limit: "500",
-    fields:
-      level === "campaign"
-        ? "campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,purchase_roas"
-        : "spend,impressions,clicks,actions,action_values,purchase_roas",
+    fields,
     time_range: JSON.stringify({
       since: since.toISOString().slice(0, 10),
       until: until.toISOString().slice(0, 10),
@@ -249,6 +272,39 @@ async function requestInsights(
   }
 
   return rows;
+}
+
+/**
+ * Account spend over a window as a single figure, with no daily breakdown.
+ *
+ * Not storable — a P&L needs spend by day — but decisive as evidence. If this reports
+ * money for days the daily queries all call empty, the spend exists and it is the
+ * breakdown Meta is withholding, which is a different problem from an account that
+ * cannot report its costs at all.
+ */
+async function fetchWindowSpend(
+  credentials: MetaCredentials,
+  since: Date,
+  until: Date,
+): Promise<number | null> {
+  const account = normalizeAccountId(credentials.adAccountId);
+  const params = new URLSearchParams({
+    access_token: credentials.accessToken,
+    level: "account",
+    fields: "spend",
+    time_range: JSON.stringify({
+      since: since.toISOString().slice(0, 10),
+      until: until.toISOString().slice(0, 10),
+    }),
+  });
+  const response = await fetch(
+    `https://graph.facebook.com/${META_API_VERSION}/${account}/insights?${params}`,
+    { cache: "no-store" },
+  );
+  if (!response.ok) return null;
+  const payload = (await response.json()) as { data?: { spend?: string }[] };
+  if (!payload.data?.length) return null;
+  return payload.data.reduce((sum, row) => sum + (Number.parseFloat(row.spend ?? "0") || 0), 0);
 }
 
 function toDailySpend(
@@ -280,38 +336,87 @@ function sumSpend(rows: MetaDailySpend[]): number {
 }
 
 /**
- * A day of spend per campaign, or per account when Meta will not break it down.
+ * Put the purchases from one answer onto the spend from another.
+ *
+ * A cost-only query returns no actions, so a row recovered that way would land in the
+ * P&L with real spend and no attributed revenue — which reads as a campaign that lost
+ * everything it was given. The first answer still carried the purchases, so key them by
+ * day and campaign and restore them.
+ */
+function withConversionsFrom(
+  rows: MetaDailySpend[],
+  source: MetaDailySpend[],
+): MetaDailySpend[] {
+  const key = (row: MetaDailySpend) => `${row.date}|${row.campaignId}`;
+  const byKey = new Map(source.map((row) => [key(row), row]));
+  // A cost-only row always arrives with zero purchases, so there is nothing of its own
+  // to protect here: take the first answer's figures wherever it has a row to match.
+  return rows.map((row) => {
+    const match = byKey.get(key(row));
+    return match
+      ? { ...row, conversions: match.conversions, conversionValue: match.conversionValue }
+      : row;
+  });
+}
+
+export type SpendFetch = {
+  rows: MetaDailySpend[];
+  /// How the figures were obtained, for a diagnostic that has to explain itself.
+  via: string;
+  /// Spend over the window with no daily breakdown, read only when every query is empty.
+  windowSpend: number | null;
+};
+
+/**
+ * A day of spend, asked for however Meta is willing to answer.
  *
  * Some tokens get a campaign split in which `spend`, `impressions` and `clicks` all read
  * "0" while the `actions` on that same row report hundreds of link clicks — figures that
- * cannot both be true, since link clicks are a subset of clicks. Meta is withholding the
- * cost columns at that breakdown rather than describing an idle account, and asking for
- * the same days without the campaign split often returns them. A P&L needs the spend far
- * more than it needs the campaign split, so take the coarser answer when the detailed one
- * comes back empty-handed.
+ * cannot both be true, since link clicks are a subset of clicks. That is Meta withholding
+ * the cost columns at the breakdown asked for, not an idle account, and a differently
+ * shaped request often returns them. So try the shapes in order, keep the first that
+ * carries spend, and report which one it was.
  */
+export async function fetchSpend(
+  credentials: MetaCredentials,
+  since: Date,
+  until: Date,
+): Promise<SpendFetch> {
+  const account = normalizeAccountId(credentials.adAccountId);
+  let first: MetaDailySpend[] = [];
+
+  for (const [index, query] of SPEND_QUERIES.entries()) {
+    const rows = toDailySpend(
+      await requestInsights(credentials, query, since, until),
+      account,
+      query.level === "campaign" ? "Unattributed" : "All campaigns",
+    );
+    if (index === 0) first = rows;
+    if (sumSpend(rows) > 0) {
+      return {
+        rows: query.withActions ? rows : withConversionsFrom(rows, first),
+        via: describeQuery(query),
+        windowSpend: null,
+      };
+    }
+  }
+
+  // Every shape came back without spend. Before calling the account idle, ask for the
+  // window as one figure: that separates "did not spend" from "will not say by day".
+  return {
+    rows: first,
+    via: describeQuery(SPEND_QUERIES[0]),
+    windowSpend: await fetchWindowSpend(credentials, since, until).catch(() => null),
+  };
+}
+
+/** The rows alone, for callers that only want to store them. */
 export async function fetchDailySpend(
   credentials: MetaCredentials,
   since: Date,
   until: Date,
 ): Promise<MetaDailySpend[]> {
-  const account = normalizeAccountId(credentials.adAccountId);
-  const byCampaign = toDailySpend(
-    await requestInsights(credentials, "campaign", since, until),
-    account,
-    "Unattributed",
-  );
-  if (sumSpend(byCampaign) > 0) return byCampaign;
-
-  const byAccount = toDailySpend(
-    await requestInsights(credentials, "account", since, until),
-    account,
-    "All campaigns",
-  );
-  // Only prefer the coarser answer where it carries the figure the detailed one was
-  // missing. Otherwise the account genuinely did not spend, and the campaign rows are the
-  // better record of what existed.
-  return sumSpend(byAccount) > 0 ? byAccount : byCampaign;
+  return (await fetchSpend(credentials, since, until)).rows;
 }
 
 /**
@@ -379,8 +484,9 @@ export async function testAccount(
   // part the sync actually depends on.
   try {
     const since = new Date(Date.now() - 7 * 86_400_000);
-    const rows = await fetchDailySpend(credentials, since, new Date());
-    const spend = rows.reduce((sum, row) => sum + row.spend, 0);
+    const found = await fetchSpend(credentials, since, new Date());
+    const rows = found.rows;
+    const spend = sumSpend(rows);
     const impressions = rows.reduce((sum, row) => sum + row.impressions, 0);
     const clicks = rows.reduce((sum, row) => sum + row.clicks, 0);
 
@@ -413,6 +519,19 @@ export async function testAccount(
         ? ` Meta puts this account's lifetime spend at ${lifetime.toFixed(2)} ${described.currency}.`
         : ` Meta would not report a lifetime spend figure for this account either, which points the same way.`;
       const purchases = rows.reduce((sum, row) => sum + row.conversions, 0);
+      /**
+       * The window figure is the one that decides this. Spend over the same seven days
+       * that every daily query reported as empty means the money is there and only the
+       * by-day breakdown is being withheld — a reporting restriction on this token, not
+       * a billing or access problem, and not something a different request will fix.
+       */
+      if (found.windowSpend && found.windowSpend > 0) {
+        return {
+          ok: false,
+          account: described.name,
+          detail: `${label}. Meta reports ${found.windowSpend.toFixed(2)} ${described.currency} of spend across these 7 days as a single figure, but returns zero for every one of those days when asked day by day — at campaign level, at account level, and with the action columns left out. The money is there; Meta is withholding the daily breakdown from this token. A token issued by the ad account's own business, rather than one reaching it through partner access, is what lifts that. Until then this account cannot be put on a daily P&L.${history}${raw}`,
+        };
+      }
 
       /**
        * Purchases on days Meta reports as having had no delivery at all cannot both be
@@ -425,7 +544,7 @@ export async function testAccount(
         return {
           ok: false,
           account: described.name,
-          detail: `${label}. Meta returned ${rows.length} campaign-days recording ${purchases.toLocaleString()} purchases alongside zero spend, zero impressions and zero clicks — figures that cannot all be true at once, and asking again without the campaign breakdown did not recover them. Meta is withholding this account's cost columns from this token. The usual cause is that the token's system user reaches the ad account through partner or analyst access that excludes spend: in Business Settings, assign the system user to this ad account directly with full ad-account access, regenerate the token with ads_read, and test again.${history}${raw}`,
+          detail: `${label}. Meta returned ${rows.length} campaign-days recording ${purchases.toLocaleString()} purchases alongside zero spend, zero impressions and zero clicks — figures that cannot all be true at once. Every query shape was tried (per campaign, account total, and both again with the action columns left out) and none returned a cost, nor did Meta report any spend at all across the window. The cost columns are being withheld from this token. The usual cause is that the token's system user reaches the ad account through partner or analyst access that excludes spend: in Business Settings, assign the system user to this ad account directly with full ad-account access, regenerate the token with ads_read, and test again.${history}${raw}`,
         };
       }
 
@@ -442,7 +561,9 @@ export async function testAccount(
     return {
       ok: true,
       account: described.name,
-      detail: `${label}. Read ${rows.length} campaign-days over the last 7 days: ${spend.toFixed(2)} ${described.currency} of spend, ${impressions.toLocaleString()} impressions, ${clicks.toLocaleString()} clicks. This account is syncing.`,
+      detail: `${label}. Read ${rows.length} campaign-days over the last 7 days: ${spend.toFixed(2)} ${described.currency} of spend, ${impressions.toLocaleString()} impressions, ${clicks.toLocaleString()} clicks${
+        found.via === describeQuery(SPEND_QUERIES[0]) ? "" : ` (read as ${found.via}, because Meta returned no cost in the campaign breakdown)`
+      }. This account is syncing.`,
     };
   } catch (error) {
     return {
