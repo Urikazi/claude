@@ -163,6 +163,14 @@ export function purchaseValue(row: InsightRow): number {
  * Insights rows carry campaign performance and no credentials: the token travels in
  * the request, never the response.
  */
+/**
+ * One raw insights row, exactly as Meta sends it.
+ *
+ * Shown when an account reads as zero spend, because the parsed figures cannot tell an
+ * idle account apart from one whose cost columns Meta is withholding. The answer is in
+ * the payload itself. Insights rows carry campaign performance and no credentials: the
+ * token travels in the request, never the response.
+ */
 export async function fetchInsightsSample(
   credentials: MetaCredentials,
   since: Date,
@@ -190,19 +198,31 @@ export async function fetchInsightsSample(
   return payload.data?.[0] ?? null;
 }
 
-export async function fetchDailySpend(
+type InsightsLevel = "campaign" | "account";
+
+/**
+ * One page-walked insights query.
+ *
+ * Split out of `fetchDailySpend` because the same days have to be asked for twice at
+ * different breakdowns: Meta will hand back a campaign split whose cost columns are all
+ * zero and an account-level total for those same days that is not.
+ */
+async function requestInsights(
   credentials: MetaCredentials,
+  level: InsightsLevel,
   since: Date,
   until: Date,
-): Promise<MetaDailySpend[]> {
+): Promise<InsightRow[]> {
   const account = normalizeAccountId(credentials.adAccountId);
   const params = new URLSearchParams({
     access_token: credentials.accessToken,
-    level: "campaign",
+    level,
     time_increment: "1",
     limit: "500",
     fields:
-      "campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,purchase_roas",
+      level === "campaign"
+        ? "campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,purchase_roas"
+        : "spend,impressions,clicks,actions,action_values,purchase_roas",
     time_range: JSON.stringify({
       since: since.toISOString().slice(0, 10),
       until: until.toISOString().slice(0, 10),
@@ -211,7 +231,7 @@ export async function fetchDailySpend(
 
   let url: string | null =
     `https://graph.facebook.com/${META_API_VERSION}/${account}/insights?${params}`;
-  const rows: MetaDailySpend[] = [];
+  const rows: InsightRow[] = [];
 
   for (let page = 0; page < 50 && url; page += 1) {
     const response = await fetch(url, { cache: "no-store" });
@@ -224,31 +244,74 @@ export async function fetchDailySpend(
       error?: { message: string };
     };
     if (payload.error) throw new MetaError(payload.error.message);
-
-    for (const row of payload.data ?? []) {
-      rows.push({
-        date: row.date_start,
-        adAccountId: account,
-        /**
-         * Meta campaign ids are unique across accounts, so they key a day's spend on
-         * their own. A row that arrives without one is the exception, and falling back
-         * to a bare "" would let two accounts' unattributed spend for the same day
-         * overwrite each other — the account id keeps them apart.
-         */
-        campaignId: row.campaign_id ?? `${account}:unattributed`,
-        campaignName: row.campaign_name ?? "Unattributed",
-        spend: Number.parseFloat(row.spend ?? "0") || 0,
-        impressions: Number.parseInt(row.impressions ?? "0", 10) || 0,
-        clicks: Number.parseInt(row.clicks ?? "0", 10) || 0,
-        conversions: purchaseCount(row.actions),
-        conversionValue: purchaseValue(row),
-      });
-    }
-
+    rows.push(...(payload.data ?? []));
     url = payload.paging?.next ?? null;
   }
 
   return rows;
+}
+
+function toDailySpend(
+  rows: InsightRow[],
+  account: string,
+  fallbackName: string,
+): MetaDailySpend[] {
+  return rows.map((row) => ({
+    date: row.date_start,
+    adAccountId: account,
+    /**
+     * Meta campaign ids are unique across accounts, so they key a day's spend on their
+     * own. A row that arrives without one is the exception, and falling back to a bare
+     * "" would let two accounts' unattributed spend for the same day overwrite each
+     * other — the account id keeps them apart.
+     */
+    campaignId: row.campaign_id ?? `${account}:unattributed`,
+    campaignName: row.campaign_name ?? fallbackName,
+    spend: Number.parseFloat(row.spend ?? "0") || 0,
+    impressions: Number.parseInt(row.impressions ?? "0", 10) || 0,
+    clicks: Number.parseInt(row.clicks ?? "0", 10) || 0,
+    conversions: purchaseCount(row.actions),
+    conversionValue: purchaseValue(row),
+  }));
+}
+
+function sumSpend(rows: MetaDailySpend[]): number {
+  return rows.reduce((sum, row) => sum + row.spend, 0);
+}
+
+/**
+ * A day of spend per campaign, or per account when Meta will not break it down.
+ *
+ * Some tokens get a campaign split in which `spend`, `impressions` and `clicks` all read
+ * "0" while the `actions` on that same row report hundreds of link clicks — figures that
+ * cannot both be true, since link clicks are a subset of clicks. Meta is withholding the
+ * cost columns at that breakdown rather than describing an idle account, and asking for
+ * the same days without the campaign split often returns them. A P&L needs the spend far
+ * more than it needs the campaign split, so take the coarser answer when the detailed one
+ * comes back empty-handed.
+ */
+export async function fetchDailySpend(
+  credentials: MetaCredentials,
+  since: Date,
+  until: Date,
+): Promise<MetaDailySpend[]> {
+  const account = normalizeAccountId(credentials.adAccountId);
+  const byCampaign = toDailySpend(
+    await requestInsights(credentials, "campaign", since, until),
+    account,
+    "Unattributed",
+  );
+  if (sumSpend(byCampaign) > 0) return byCampaign;
+
+  const byAccount = toDailySpend(
+    await requestInsights(credentials, "account", since, until),
+    account,
+    "All campaigns",
+  );
+  // Only prefer the coarser answer where it carries the figure the detailed one was
+  // missing. Otherwise the account genuinely did not spend, and the campaign rows are the
+  // better record of what existed.
+  return sumSpend(byAccount) > 0 ? byAccount : byCampaign;
 }
 
 /**
@@ -284,7 +347,7 @@ export function describeAccountStatus(status: number): string {
 export async function testAccount(
   credentials: MetaCredentials,
 ): Promise<{ ok: boolean; account: string | null; detail: string }> {
-  let described: { name: string; currency: string; account_status: number };
+  let described: Awaited<ReturnType<typeof verifyCredentials>>;
   try {
     described = await verifyCredentials(credentials);
   } catch (error) {
@@ -339,21 +402,40 @@ export async function testAccount(
      */
     if (spend === 0) {
       // Rows that all read as zero are the ambiguous case, so show one as Meta sent it.
-      // Whether `spend` is absent, "0", or something this client is failing to read is
-      // visible there and nowhere else.
       const sample = await fetchInsightsSample(credentials, since, new Date()).catch(
         () => null,
       );
       const raw = sample
         ? ` Meta's first row, verbatim: ${JSON.stringify(sample).slice(0, 400)}`
         : "";
+      const lifetime = Number.parseFloat(described.amount_spent ?? "") / 100;
+      const history = Number.isFinite(lifetime)
+        ? ` Meta puts this account's lifetime spend at ${lifetime.toFixed(2)} ${described.currency}.`
+        : ` Meta would not report a lifetime spend figure for this account either, which points the same way.`;
+      const purchases = rows.reduce((sum, row) => sum + row.conversions, 0);
+
+      /**
+       * Purchases on days Meta reports as having had no delivery at all cannot both be
+       * true, and `fetchDailySpend` has already retried without the campaign breakdown
+       * by this point. A self-contradicting answer that survives that retry is Meta
+       * withholding the cost columns from this token — an access question, not a quiet
+       * account — so say which screen fixes it rather than reporting a healthy nothing.
+       */
+      if (purchases > 0 && impressions === 0) {
+        return {
+          ok: false,
+          account: described.name,
+          detail: `${label}. Meta returned ${rows.length} campaign-days recording ${purchases.toLocaleString()} purchases alongside zero spend, zero impressions and zero clicks — figures that cannot all be true at once, and asking again without the campaign breakdown did not recover them. Meta is withholding this account's cost columns from this token. The usual cause is that the token's system user reaches the ad account through partner or analyst access that excludes spend: in Business Settings, assign the system user to this ad account directly with full ad-account access, regenerate the token with ads_read, and test again.${history}${raw}`,
+        };
+      }
+
       return {
         ok: true,
         account: described.name,
         detail:
           impressions > 0
-            ? `${label}. Meta returned ${rows.length} campaign-days with ${impressions.toLocaleString()} impressions but 0.00 ${described.currency} of spend, which is unusual — check this account in Ads Manager over the same 7 days.${raw}`
-            : `${label}. Meta returned ${rows.length} campaign-days, all with no spend and no impressions — these campaigns did not deliver in the last 7 days, so there is nothing for this account to contribute.${raw}`,
+            ? `${label}. Meta returned ${rows.length} campaign-days with ${impressions.toLocaleString()} impressions but 0.00 ${described.currency} of spend, which is unusual — check this account in Ads Manager over the same 7 days.${history}${raw}`
+            : `${label}. Meta returned ${rows.length} campaign-days, all with no spend, no impressions and no purchases — these campaigns did not deliver in the last 7 days, so there is nothing for this account to contribute.${history}`,
       };
     }
 
@@ -377,7 +459,10 @@ export async function verifyCredentials(credentials: MetaCredentials) {
   const account = normalizeAccountId(credentials.adAccountId);
   const params = new URLSearchParams({
     access_token: credentials.accessToken,
-    fields: "name,currency,account_status",
+    // `amount_spent` is the decisive permission probe: a token barred from an account's
+    // cost data gets zeros here too, while one that is merely looking at a quiet week
+    // still sees the lifetime figure.
+    fields: "name,currency,account_status,amount_spent",
   });
   const response = await fetch(
     `https://graph.facebook.com/${META_API_VERSION}/${account}?${params}`,
@@ -390,5 +475,7 @@ export async function verifyCredentials(credentials: MetaCredentials) {
     name: string;
     currency: string;
     account_status: number;
+    /// Lifetime spend in the account currency's minor unit, as a string.
+    amount_spent?: string;
   };
 }
