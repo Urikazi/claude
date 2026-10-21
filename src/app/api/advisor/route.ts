@@ -5,6 +5,7 @@ import { findAdvisorAgent } from "@/lib/advisor/agents";
 import { advisorRange } from "@/lib/advisor/context";
 import { getAdvisorApiKey } from "@/lib/advisor/api-key";
 import { getAdvisorModel } from "@/lib/advisor/models";
+import { prepareAttachments } from "@/lib/advisor/attachments";
 
 export const dynamic = "force-dynamic";
 /// Analysis of a quarter's trading takes longer than the default serverless slice.
@@ -32,16 +33,26 @@ export async function POST(request: Request) {
     storeId?: string;
     message?: string;
     agent?: string;
+    attachments?: unknown;
   } | null;
   const storeId = input?.storeId?.trim();
-  const message = input?.message?.trim();
-  if (!storeId || !message) {
-    return Response.json({ error: "Missing store or message." }, { status: 400 });
+  const message = input?.message?.trim() ?? "";
+  if (!storeId) {
+    return Response.json({ error: "Missing store." }, { status: 400 });
   }
   const agent = findAdvisorAgent(input?.agent?.trim());
   if (!agent) return Response.json({ error: "Unknown advisor." }, { status: 400 });
   if (message.length > 100_000) {
     return Response.json({ error: "That message is too long to send." }, { status: 400 });
+  }
+
+  const attached = prepareAttachments(input?.attachments);
+  if (!attached.ok) return Response.json({ error: attached.error }, { status: 400 });
+  const { blocks, transcript } = attached.prepared;
+  // A file on its own is a complete request — "here, look at this" — so an empty box
+  // with something attached is allowed, and only an empty box with nothing is not.
+  if (!message && !blocks.length && !transcript) {
+    return Response.json({ error: "Missing store or message." }, { status: 400 });
   }
 
   const store = await prisma.store.findUnique({ where: { id: storeId } });
@@ -65,8 +76,18 @@ export async function POST(request: Request) {
   });
   const snapshot = await agent.buildContext(storeId, advisorRange(store, agent.days));
 
+  /**
+   * What the thread keeps.
+   *
+   * A readable file's text is written into the turn, so the next question can refer
+   * back to it without the file being attached again. Images and PDFs leave a note
+   * instead: re-sending their bytes on every later turn would cost more than it saves,
+   * so they are read for this question only — which the note says, rather than letting
+   * a later turn quietly answer about a PDF it can no longer see.
+   */
+  const recorded = [message, transcript].filter(Boolean).join("\n\n");
   await prisma.advisorMessage.create({
-    data: { storeId, agent: agent.key, role: "user", content: message },
+    data: { storeId, agent: agent.key, role: "user", content: recorded },
   });
 
   const messages: Anthropic.MessageParam[] = [
@@ -76,10 +97,21 @@ export async function POST(request: Request) {
         role: entry.role === "assistant" ? ("assistant" as const) : ("user" as const),
         content: entry.content,
       })),
-    // The snapshot rides with the question rather than in the system prompt: it changes
-    // on every turn, and anything that changes has to sit after the cache breakpoint or
-    // it invalidates the prefix each time.
-    { role: "user", content: `${snapshot}\n\n---\n\n${message}` },
+    {
+      role: "user",
+      // Documents and images lead, ahead of the text that asks about them — the order
+      // the API's own guidance gives for a question wrapped around a file.
+      content: [
+        ...blocks,
+        // The snapshot rides with the question rather than in the system prompt: it
+        // changes on every turn, and anything that changes has to sit after the cache
+        // breakpoint or it invalidates the prefix each time.
+        {
+          type: "text" as const,
+          text: `${snapshot}\n\n---\n\n${recorded || "Read the attached file and tell me what matters in it for this store."}`,
+        },
+      ],
+    },
   ];
 
   const model = await getAdvisorModel();
