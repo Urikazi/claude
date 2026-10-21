@@ -152,6 +152,44 @@ export function purchaseValue(row: InsightRow): number {
   return 0;
 }
 
+/**
+ * One raw insights row, exactly as Meta sends it.
+ *
+ * For the case where rows come back and every one of them reads as zero spend. That
+ * can be an idle account or a field this client is misreading, and no amount of
+ * reasoning from the parsed figures distinguishes them — the answer is in what the
+ * API actually returned, so it is fetched and shown rather than guessed at.
+ *
+ * Insights rows carry campaign performance and no credentials: the token travels in
+ * the request, never the response.
+ */
+export async function fetchInsightsSample(
+  credentials: MetaCredentials,
+  since: Date,
+  until: Date,
+): Promise<Record<string, unknown> | null> {
+  const account = normalizeAccountId(credentials.adAccountId);
+  const params = new URLSearchParams({
+    access_token: credentials.accessToken,
+    level: "campaign",
+    time_increment: "1",
+    limit: "3",
+    fields:
+      "campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,purchase_roas",
+    time_range: JSON.stringify({
+      since: since.toISOString().slice(0, 10),
+      until: until.toISOString().slice(0, 10),
+    }),
+  });
+  const response = await fetch(
+    `https://graph.facebook.com/${META_API_VERSION}/${account}/insights?${params}`,
+    { cache: "no-store" },
+  );
+  if (!response.ok) return null;
+  const payload = (await response.json()) as { data?: Record<string, unknown>[] };
+  return payload.data?.[0] ?? null;
+}
+
 export async function fetchDailySpend(
   credentials: MetaCredentials,
   since: Date,
@@ -300,13 +338,22 @@ export async function testAccount(
      * because only one of them is a question for this dashboard.
      */
     if (spend === 0) {
+      // Rows that all read as zero are the ambiguous case, so show one as Meta sent it.
+      // Whether `spend` is absent, "0", or something this client is failing to read is
+      // visible there and nowhere else.
+      const sample = await fetchInsightsSample(credentials, since, new Date()).catch(
+        () => null,
+      );
+      const raw = sample
+        ? ` Meta's first row, verbatim: ${JSON.stringify(sample).slice(0, 400)}`
+        : "";
       return {
         ok: true,
         account: described.name,
         detail:
           impressions > 0
-            ? `${label}. Meta returned ${rows.length} campaign-days with ${impressions.toLocaleString()} impressions but 0.00 ${described.currency} of spend, which is unusual — check this account in Ads Manager over the same 7 days.`
-            : `${label}. Meta returned ${rows.length} campaign-days, all with no spend and no impressions. The connection is fine: these campaigns did not deliver in the last 7 days, so there is nothing for this account to contribute.`,
+            ? `${label}. Meta returned ${rows.length} campaign-days with ${impressions.toLocaleString()} impressions but 0.00 ${described.currency} of spend, which is unusual — check this account in Ads Manager over the same 7 days.${raw}`
+            : `${label}. Meta returned ${rows.length} campaign-days, all with no spend and no impressions — these campaigns did not deliver in the last 7 days, so there is nothing for this account to contribute.${raw}`,
       };
     }
 
