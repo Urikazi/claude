@@ -280,13 +280,40 @@ export async function testAccount(
     const since = new Date(Date.now() - 7 * 86_400_000);
     const rows = await fetchDailySpend(credentials, since, new Date());
     const spend = rows.reduce((sum, row) => sum + row.spend, 0);
+    const impressions = rows.reduce((sum, row) => sum + row.impressions, 0);
+    const clicks = rows.reduce((sum, row) => sum + row.clicks, 0);
+
+    if (!rows.length) {
+      return {
+        ok: true,
+        account: described.name,
+        detail: `${label}. Readable, but Meta returned no campaign rows at all for the last 7 days — nothing ran on this account in that window.`,
+      };
+    }
+
+    /**
+     * Rows but no spend.
+     *
+     * The case that looks like a broken connection and is not one. Impressions tell the
+     * two apart: campaigns that exist but never delivered are a paused account, while
+     * delivery with no spend would be a figure Meta is withholding — worth separating,
+     * because only one of them is a question for this dashboard.
+     */
+    if (spend === 0) {
+      return {
+        ok: true,
+        account: described.name,
+        detail:
+          impressions > 0
+            ? `${label}. Meta returned ${rows.length} campaign-days with ${impressions.toLocaleString()} impressions but 0.00 ${described.currency} of spend, which is unusual — check this account in Ads Manager over the same 7 days.`
+            : `${label}. Meta returned ${rows.length} campaign-days, all with no spend and no impressions. The connection is fine: these campaigns did not deliver in the last 7 days, so there is nothing for this account to contribute.`,
+      };
+    }
+
     return {
       ok: true,
       account: described.name,
-      detail:
-        rows.length > 0
-          ? `${label}. Read ${rows.length} campaign-days over the last 7 days, ${spend.toFixed(2)} ${described.currency} of spend.`
-          : `${label}. Readable, but Meta returned no campaign rows for the last 7 days — this account has no spend to sync in that window.`,
+      detail: `${label}. Read ${rows.length} campaign-days over the last 7 days: ${spend.toFixed(2)} ${described.currency} of spend, ${impressions.toLocaleString()} impressions, ${clicks.toLocaleString()} clicks. This account is syncing.`,
     };
   } catch (error) {
     return {
