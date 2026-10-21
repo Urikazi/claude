@@ -574,7 +574,14 @@ export async function addManualAdSpend(
 
   await prisma.adSpendEntry.upsert({
     where: {
-      storeId_date_platform_campaignId: { storeId, date, platform, campaignId },
+      // Typed rows are billed to no ad account, so the blank is their place in the key.
+      storeId_date_platform_adAccountId_campaignId: {
+        storeId,
+        date,
+        platform,
+        adAccountId: "",
+        campaignId,
+      },
     },
     create: { storeId, date, platform, campaignId, campaignName, spend },
     update: { spend, campaignName },
@@ -625,10 +632,11 @@ export async function importAdSpendPaste(
     [...byDate.entries()].map(([date, spend]) =>
       prisma.adSpendEntry.upsert({
         where: {
-          storeId_date_platform_campaignId: {
+          storeId_date_platform_adAccountId_campaignId: {
             storeId,
             date: new Date(`${date}T00:00:00.000Z`),
             platform,
+            adAccountId: "",
             campaignId,
           },
         },

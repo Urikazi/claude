@@ -275,9 +275,13 @@ model AdSpendEntry {
 
   campaignId   String  @default("")
   campaignName String?
-  /// Which ad account billed this row. Not part of the key below: Meta campaign ids
-  /// are unique across accounts, so two accounts cannot collide on one. It is kept
-  /// for display and for clearing one account's rows without touching another's.
+  /// Which ad account billed this row, and part of the key below.
+  ///
+  /// It was left out of the key at first, on the grounds that Meta campaign ids are
+  /// unique across accounts so two accounts could not collide on one. That is a
+  /// property of someone else's system to rely on, and the cost of being wrong is
+  /// silent: one account's day would overwrite another's with no error anywhere.
+  /// Identity here is the account and the campaign together.
   adAccountId  String  @default("")
 
   spend           Float @default(0)
@@ -293,8 +297,9 @@ model AdSpendEntry {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([storeId, date, platform, campaignId])
+  @@unique([storeId, date, platform, adAccountId, campaignId])
   @@index([storeId, date])
+  @@index([storeId, adAccountId])
 }
 
 /// One turn of an advisor conversation for a store.

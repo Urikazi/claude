@@ -370,10 +370,11 @@ export async function syncMetaAds(
         };
         return prisma.adSpendEntry.upsert({
           where: {
-            storeId_date_platform_campaignId: {
+            storeId_date_platform_adAccountId_campaignId: {
               storeId,
               date,
               platform: "meta",
+              adAccountId: row.adAccountId,
               campaignId: row.campaignId,
             },
           },

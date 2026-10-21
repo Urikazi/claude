@@ -24,7 +24,7 @@ export default async function AdsPage({
   const currency = store.currency;
 
   const where = { storeId: store.id, date: { gte: range.from, lte: range.to } };
-  const [report, entries, grouped, byAccount, accounts] = await Promise.all([
+  const [report, entries, grouped, byAccount, accounts, lastMetaSync] = await Promise.all([
     buildPnlReport(store.id, range),
     // The daily list is a recent-activity view and says so; the figures above it are
     // aggregated in the database instead, so nothing depends on this limit.
@@ -51,7 +51,14 @@ export default async function AdsPage({
       where,
       _sum: { spend: true, conversions: true, conversionValue: true },
     }),
-    prisma.metaAdAccount.findMany({ where: { storeId: store.id } }),
+    prisma.metaAdAccount.findMany({
+      where: { storeId: store.id },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    }),
+    prisma.syncLog.findFirst({
+      where: { storeId: store.id, source: "meta" },
+      orderBy: { startedAt: "desc" },
+    }),
   ]);
 
   // Ad accounts are named on screen where the operator gave them a name; an id is no
@@ -74,15 +81,41 @@ export default async function AdsPage({
     }))
     .sort((a, b) => b.spend - a.spend);
 
-  // Spend per ad account, for a store drawing on more than one.
-  const accountRows = byAccount
-    .map((row) => ({
-      account: nameAccount(row.adAccountId),
-      spend: round2(row._sum.spend ?? 0),
-      conversions: row._sum.conversions ?? 0,
-      conversionValue: round2(row._sum.conversionValue ?? 0),
-    }))
-    .sort((a, b) => b.spend - a.spend);
+  /**
+   * Spend per ad account — every connected account, including one that contributed
+   * nothing.
+   *
+   * Listing only the accounts with rows is what makes a failed sync invisible: an
+   * account whose fetch is being refused simply does not appear, and the total looks
+   * like the whole picture. An account showing zero is a question worth asking; an
+   * account missing from the page is not a question at all.
+   */
+  const spendByAccountId = new Map(
+    byAccount.map((row) => [
+      row.adAccountId,
+      {
+        spend: round2(row._sum.spend ?? 0),
+        conversions: row._sum.conversions ?? 0,
+        conversionValue: round2(row._sum.conversionValue ?? 0),
+      },
+    ]),
+  );
+  const connected = accounts.map((account) => ({
+    account: account.label?.trim() || account.accountId,
+    accountId: account.accountId,
+    active: account.active,
+    ...(spendByAccountId.get(account.accountId) ?? {
+      spend: 0,
+      conversions: 0,
+      conversionValue: 0,
+    }),
+  }));
+  // Spend billed to an account the store no longer lists — a removed account's history.
+  const orphaned = [...spendByAccountId.entries()]
+    .filter(([id]) => id && !accounts.some((account) => account.accountId === id))
+    .map(([id, row]) => ({ account: id, accountId: id, active: false, ...row }));
+  const accountRows = [...connected, ...orphaned].sort((a, b) => b.spend - a.spend);
+  const silentAccounts = accountRows.filter((row) => row.active && row.spend === 0);
 
   const { totals } = report;
   const ncRoas = newCustomerRoas(totals, store.metaReportsNewCustomersOnly);
@@ -195,7 +228,7 @@ export default async function AdsPage({
         <ManualAdSpendForm storeId={store.id} />
       </Card>
 
-      {accountRows.length > 1 ? (
+      {accountRows.length > 1 || silentAccounts.length ? (
         <Card title="By ad account">
           <p className="mb-3 text-sm text-muted">
             Every connected account&rsquo;s spend is added into the totals above. This is the
@@ -214,9 +247,19 @@ export default async function AdsPage({
               </thead>
               <tbody>
                 {accountRows.map((row) => (
-                  <tr key={row.account}>
-                    <Td>{row.account}</Td>
-                    <Td align="right">{formatMoney(row.spend, currency)}</Td>
+                  <tr key={row.accountId || row.account}>
+                    <Td>
+                      {row.account}
+                      {!row.active ? (
+                        <span className="ml-2 text-[11px] text-muted">not syncing</span>
+                      ) : null}
+                    </Td>
+                    <Td align="right">
+                      {formatMoney(row.spend, currency)}
+                      {row.active && row.spend === 0 ? (
+                        <span className="block text-[11px] text-neg">nothing synced</span>
+                      ) : null}
+                    </Td>
                     <Td align="right">
                       {totals.adSpend > 0
                         ? `${((row.spend / totals.adSpend) * 100).toFixed(1)}%`
@@ -245,6 +288,19 @@ export default async function AdsPage({
               </tbody>
             </table>
           </div>
+          {silentAccounts.length ? (
+            <p className="mt-3 text-xs text-neg">
+              {silentAccounts.map((row) => row.account).join(" and ")}{" "}
+              {silentAccounts.length === 1 ? "is connected but has" : "are connected but have"}{" "}
+              no spend in this range, so {silentAccounts.length === 1 ? "it is" : "they are"}{" "}
+              contributing nothing to the total above. Either{" "}
+              {silentAccounts.length === 1 ? "it" : "they"} genuinely did not spend, or the
+              sync is not reaching {silentAccounts.length === 1 ? "it" : "them"}.
+              {lastMetaSync?.status === "error"
+                ? ` The last Meta sync failed: ${lastMetaSync.message ?? "no detail"}`
+                : " Run Sync all and read the Meta line for what came back per account."}
+            </p>
+          ) : null}
           <p className="mt-3 text-xs text-muted">
             Platform ROAS is each account&rsquo;s own attributed value over its own spend.
             Accounts attribute separately, so these do not sum to a blended figure and the
