@@ -23,36 +23,66 @@ export default async function AdsPage({
   const range = resolveRange(rangeParam, from, to, store.timezone);
   const currency = store.currency;
 
-  const [report, entries] = await Promise.all([
+  const where = { storeId: store.id, date: { gte: range.from, lte: range.to } };
+  const [report, entries, grouped, byAccount, accounts] = await Promise.all([
     buildPnlReport(store.id, range),
+    // The daily list is a recent-activity view and says so; the figures above it are
+    // aggregated in the database instead, so nothing depends on this limit.
     prisma.adSpendEntry.findMany({
-      where: { storeId: store.id, date: { gte: range.from, lte: range.to } },
+      where,
       orderBy: [{ date: "desc" }, { spend: "desc" }],
       take: 200,
     }),
+    /**
+     * Campaign totals, summed by the database rather than by reading rows back.
+     *
+     * These were built from the 200 rows fetched above, which quietly truncated the
+     * table: a store running two ad accounts over sixty days has hundreds of rows, so
+     * the campaign list showed a fraction of the spend while the total above it was
+     * right — the two disagreeing with no sign of why.
+     */
+    prisma.adSpendEntry.groupBy({
+      by: ["platform", "campaignId", "campaignName", "adAccountId"],
+      where,
+      _sum: { spend: true, clicks: true, impressions: true, conversions: true },
+    }),
+    prisma.adSpendEntry.groupBy({
+      by: ["adAccountId"],
+      where,
+      _sum: { spend: true, conversions: true, conversionValue: true },
+    }),
+    prisma.metaAdAccount.findMany({ where: { storeId: store.id } }),
   ]);
 
-  const byCampaign = new Map<
-    string,
-    { name: string; platform: string; spend: number; clicks: number; impressions: number; conversions: number }
-  >();
-  for (const entry of entries) {
-    const key = `${entry.platform}:${entry.campaignId}`;
-    const row = byCampaign.get(key) ?? {
-      name: entry.campaignName ?? "Unattributed",
-      platform: entry.platform,
-      spend: 0,
-      clicks: 0,
-      impressions: 0,
-      conversions: 0,
-    };
-    row.spend += entry.spend;
-    row.clicks += entry.clicks;
-    row.impressions += entry.impressions;
-    row.conversions += entry.conversions;
-    byCampaign.set(key, row);
-  }
-  const campaigns = [...byCampaign.values()].sort((a, b) => b.spend - a.spend);
+  // Ad accounts are named on screen where the operator gave them a name; an id is no
+  // help in telling two apart.
+  const accountLabel = new Map(
+    accounts.map((account) => [account.accountId, account.label?.trim() || account.accountId]),
+  );
+  const nameAccount = (id: string) => (id ? (accountLabel.get(id) ?? id) : "Unattributed");
+
+  const campaigns = grouped
+    .map((row) => ({
+      name: row.campaignName ?? "Unattributed",
+      platform: row.platform,
+      campaignId: row.campaignId,
+      account: nameAccount(row.adAccountId),
+      spend: round2(row._sum.spend ?? 0),
+      clicks: row._sum.clicks ?? 0,
+      impressions: row._sum.impressions ?? 0,
+      conversions: row._sum.conversions ?? 0,
+    }))
+    .sort((a, b) => b.spend - a.spend);
+
+  // Spend per ad account, for a store drawing on more than one.
+  const accountRows = byAccount
+    .map((row) => ({
+      account: nameAccount(row.adAccountId),
+      spend: round2(row._sum.spend ?? 0),
+      conversions: row._sum.conversions ?? 0,
+      conversionValue: round2(row._sum.conversionValue ?? 0),
+    }))
+    .sort((a, b) => b.spend - a.spend);
 
   const { totals } = report;
   const ncRoas = newCustomerRoas(totals, store.metaReportsNewCustomersOnly);
@@ -165,6 +195,64 @@ export default async function AdsPage({
         <ManualAdSpendForm storeId={store.id} />
       </Card>
 
+      {accountRows.length > 1 ? (
+        <Card title="By ad account">
+          <p className="mb-3 text-sm text-muted">
+            Every connected account&rsquo;s spend is added into the totals above. This is the
+            same spend, split by where it was billed.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px]">
+              <thead>
+                <tr>
+                  <Th>Ad account</Th>
+                  <Th align="right">Spend</Th>
+                  <Th align="right">Share</Th>
+                  <Th align="right">Purchases</Th>
+                  <Th align="right">Platform ROAS</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {accountRows.map((row) => (
+                  <tr key={row.account}>
+                    <Td>{row.account}</Td>
+                    <Td align="right">{formatMoney(row.spend, currency)}</Td>
+                    <Td align="right">
+                      {totals.adSpend > 0
+                        ? `${((row.spend / totals.adSpend) * 100).toFixed(1)}%`
+                        : "—"}
+                    </Td>
+                    <Td align="right">{formatNumber(row.conversions)}</Td>
+                    <Td align="right">
+                      {row.spend > 0 ? `${(row.conversionValue / row.spend).toFixed(2)}x` : "—"}
+                    </Td>
+                  </tr>
+                ))}
+                <tr className="border-t border-line font-semibold">
+                  <Td>Total</Td>
+                  <Td align="right">
+                    {formatMoney(
+                      round2(accountRows.reduce((sum, row) => sum + row.spend, 0)),
+                      currency,
+                    )}
+                  </Td>
+                  <Td align="right">100.0%</Td>
+                  <Td align="right">
+                    {formatNumber(accountRows.reduce((sum, row) => sum + row.conversions, 0))}
+                  </Td>
+                  <Td align="right">{""}</Td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-muted">
+            Platform ROAS is each account&rsquo;s own attributed value over its own spend.
+            Accounts attribute separately, so these do not sum to a blended figure and the
+            values behind them must not be added to Shopify revenue.
+          </p>
+        </Card>
+      ) : null}
+
       <Card title="Campaigns">
         {campaigns.length === 0 ? (
           <Empty>Nothing to show. Connect Meta Ads in Settings, then sync.</Empty>
@@ -174,6 +262,7 @@ export default async function AdsPage({
               <thead>
                 <tr>
                   <Th>Campaign</Th>
+                  <Th>Ad account</Th>
                   <Th>Platform</Th>
                   <Th align="right">Spend</Th>
                   <Th align="right">Impressions</Th>
@@ -184,8 +273,11 @@ export default async function AdsPage({
               </thead>
               <tbody>
                 {campaigns.map((row) => (
-                  <tr key={`${row.platform}:${row.name}`}>
+                  <tr key={`${row.platform}:${row.campaignId}:${row.account}`}>
                     <Td>{row.name}</Td>
+                    <Td>
+                      <span className="text-muted">{row.account}</span>
+                    </Td>
                     <Td>
                       <span className="text-muted">{row.platform}</span>
                     </Td>
@@ -210,6 +302,12 @@ export default async function AdsPage({
         {entries.length === 0 ? (
           <Empty>No entries.</Empty>
         ) : (
+          <>
+          {entries.length >= 200 ? (
+            <p className="mb-3 text-xs text-muted">
+              The 200 most recent rows. The figures above cover the whole range.
+            </p>
+          ) : null}
           <div className="max-h-96 overflow-auto">
             <table className="w-full min-w-[560px]">
               <thead className="sticky top-0 bg-panel">
@@ -234,6 +332,7 @@ export default async function AdsPage({
               </tbody>
             </table>
           </div>
+          </>
         )}
       </Card>
     </div>
