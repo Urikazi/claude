@@ -1,5 +1,6 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { z } from "zod";
@@ -12,6 +13,9 @@ import { DEFAULT_TIME_ZONE, isValidTimeZone } from "@/lib/timezone";
 import { parsePriceList, priceListToRows, withCountryFallback } from "@/lib/price-list";
 import { parseCogsCsv, CogsCsvError } from "@/lib/supplier-cogs-csv";
 import * as metaAds from "@/lib/integrations/meta-ads";
+import * as freshdesk from "@/lib/integrations/freshdesk";
+import { parseSupportMode } from "@/lib/support/decide";
+import { handleTicket } from "@/lib/support/handle-ticket";
 import {
   clearAdvisorApiKey,
   describeApiKeyProblem,
@@ -1094,4 +1098,92 @@ export async function createStore(
     ok: true,
     message: `${name} added. Connect it in settings, then sync.`,
   };
+}
+
+/**
+ * Saves the Freshdesk connection and reply settings for a store.
+ *
+ * The key is checked against Freshdesk before anything is stored, so a wrong domain or
+ * key is reported here rather than as a silent failure on the first ticket. A webhook
+ * secret is generated the first time replies are switched on; the operator never types
+ * one, and "regenerate" replaces it when one may have leaked.
+ */
+export async function updateFreshdeskSettings(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const storeId = formData.get("storeId")?.toString() ?? "";
+  const store = await prisma.store.findUnique({ where: { id: storeId } });
+  if (!store) return { ok: false, message: "That store no longer exists." };
+
+  const domainInput = formData.get("freshdeskDomain")?.toString().trim() ?? "";
+  const domain = domainInput ? freshdesk.normalizeFreshdeskDomain(domainInput) : null;
+  const apiKey = keepIfBlank(formData.get("freshdeskApiKey")?.toString()) ?? store.freshdeskApiKey;
+  const mode = parseSupportMode(formData.get("freshdeskMode")?.toString());
+  const policies = formData.get("supportPolicies")?.toString().trim() || null;
+  const regenerate = formData.get("regenerateSecret") === "on";
+
+  if (mode !== "off" && (!domain || !apiKey)) {
+    return { ok: false, message: "Add the helpdesk domain and an API key before switching replies on." };
+  }
+
+  let who = "";
+  if (domain && apiKey) {
+    try {
+      const agent = await freshdesk.verifyCredentials({ domain, apiKey });
+      who = ` Connected as ${agent.name}${agent.email ? ` (${agent.email})` : ""} — automatic replies are sent under that name.`;
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  const secret =
+    regenerate || (!store.freshdeskWebhookSecret && mode !== "off")
+      ? randomBytes(24).toString("base64url")
+      : store.freshdeskWebhookSecret;
+
+  await prisma.store.update({
+    where: { id: storeId },
+    data: {
+      freshdeskDomain: domain,
+      freshdeskApiKey: apiKey,
+      freshdeskMode: mode,
+      supportPolicies: policies,
+      freshdeskWebhookSecret: secret,
+    },
+  });
+  revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/support");
+  const modeText =
+    mode === "off"
+      ? "Replies are off."
+      : mode === "draft"
+        ? "Claude will leave drafts as private notes."
+        : "Claude will send routine replies and draft the rest.";
+  return {
+    ok: true,
+    message: `Saved. ${modeText}${who}${regenerate ? " New webhook secret generated — update it in your Freshdesk automation." : ""}`,
+  };
+}
+
+/** Drafts a reply for one ticket on request. Always a private note, never a send. */
+export async function draftTicketReply(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const storeId = formData.get("storeId")?.toString() ?? "";
+  const raw = formData.get("ticketId")?.toString().trim().replace(/^#/, "") ?? "";
+  const ticketId = Number.parseInt(raw, 10);
+  if (!Number.isFinite(ticketId) || ticketId <= 0) {
+    return { ok: false, message: "Enter a ticket number, like 1234." };
+  }
+  try {
+    const result = await handleTicket({ storeId, ticketId, trigger: "manual" });
+    revalidatePath("/dashboard/support");
+    return { ok: result.status !== "error", message: result.message };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
 }

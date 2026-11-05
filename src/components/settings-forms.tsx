@@ -7,6 +7,7 @@ import {
   updateAdvisorApiKey,
   updateAdvisorModel,
   updateFeeConfig,
+  updateFreshdeskSettings,
   updateStoreSettings,
   testMetaAdAccount,
   type ActionState,
@@ -713,5 +714,143 @@ export function SyncPanel({ storeId }: { storeId: string }) {
         </p>
       )}
     </Card>
+  );
+}
+
+export type FreshdeskSettings = {
+  storeId: string;
+  domain: string | null;
+  hasApiKey: boolean;
+  mode: "off" | "draft" | "auto";
+  policies: string;
+  webhookUrl: string | null;
+  webhookSecret: string | null;
+};
+
+const SUPPORT_MODES = [
+  {
+    value: "off",
+    label: "Off",
+    note: "Nothing happens when tickets arrive. You can still draft a reply on request from the Support page.",
+  },
+  {
+    value: "draft",
+    label: "Drafts only",
+    note: "Every new customer message gets a draft reply as a private note. Nothing is ever emailed to a customer.",
+  },
+  {
+    value: "auto",
+    label: "Send when safe, draft the rest",
+    note: "Routine questions (order status, shipping, product questions) that Claude answers with high confidence from your order data and policies are sent straight away. Refunds, damage, complaints, anything uncertain — and anything mentioning chargebacks, refunds or legal action — is drafted instead.",
+  },
+] as const;
+
+export function FreshdeskForm({ settings }: { settings: FreshdeskSettings }) {
+  const [state, formAction, pending] = useActionState<ActionState, FormData>(
+    updateFreshdeskSettings,
+    null,
+  );
+  const [mode, setMode] = useState(settings.mode);
+  const selected = SUPPORT_MODES.find((option) => option.value === mode) ?? SUPPORT_MODES[0];
+
+  return (
+    <form action={formAction} className="space-y-4">
+      <input type="hidden" name="storeId" value={settings.storeId} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Helpdesk domain" hint="yourcompany.freshdesk.com">
+          <input
+            name="freshdeskDomain"
+            defaultValue={settings.domain ?? ""}
+            placeholder="yourcompany.freshdesk.com"
+            className={inputClass}
+          />
+        </Field>
+        <Field
+          label="API key"
+          hint="Freshdesk → your avatar → Profile settings → View API key. Replies are posted as this agent."
+        >
+          <input
+            name="freshdeskApiKey"
+            type="password"
+            autoComplete="off"
+            placeholder={settings.hasApiKey ? "•••••••• (leave blank to keep)" : "API key"}
+            className={inputClass}
+          />
+        </Field>
+      </div>
+
+      <Field label="When a customer writes in">
+        <select
+          name="freshdeskMode"
+          value={mode}
+          onChange={(event) => setMode(event.target.value as FreshdeskSettings["mode"])}
+          className={inputClass}
+        >
+          {SUPPORT_MODES.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <p className="text-xs text-muted">{selected.note}</p>
+
+      <Field
+        label="Store policies for Claude"
+        hint="Shipping times per country, returns window, what you do about late or damaged parcels, tone, and how to sign off. Claude only states policies written here."
+      >
+        <textarea
+          name="supportPolicies"
+          defaultValue={settings.policies}
+          rows={8}
+          placeholder={
+            "Shipping: orders ship within 2 business days; US delivery 5–8 business days, EU 7–12.\nReturns: 30 days from delivery, unused, customer pays return postage.\nDamaged items: ask for a photo; the team will arrange a replacement.\nSign off: Best, The Acme Team"
+          }
+          className={inputClass}
+        />
+      </Field>
+
+      {settings.webhookUrl && settings.webhookSecret ? (
+        <div className="space-y-2 rounded-lg border border-line bg-panel-2 p-4 text-xs">
+          <p className="font-medium text-body">Freshdesk automation</p>
+          <p className="text-muted">
+            In Freshdesk, go to Admin → Workflows → Automations → <strong>Ticket creation</strong>,
+            and create a rule for all new tickets with the action <strong>Trigger webhook</strong>:
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-muted">
+            <li>
+              Request type <code>POST</code>, URL <code className="break-all text-accent">{settings.webhookUrl}</code>
+            </li>
+            <li>
+              Custom header <code>Authorization</code>:{" "}
+              <code className="break-all text-accent">Bearer {settings.webhookSecret}</code>
+            </li>
+            <li>
+              Encoding JSON, Advanced content: <code>{'{"ticket_id": "{{ticket.id}}"}'}</code>
+            </li>
+          </ul>
+          <p className="text-muted">
+            To answer follow-ups too, add the same action under <strong>Ticket updates</strong> with the
+            condition &ldquo;Reply is sent&rdquo; by &ldquo;Requester&rdquo;. Each customer message is
+            answered once, so retries and Claude&rsquo;s own notes do not trigger a second reply.
+          </p>
+          <label className="flex items-center gap-2 pt-1 text-sm">
+            <input type="checkbox" name="regenerateSecret" className="h-4 w-4 rounded border-line" />
+            <span>Generate a new secret</span>
+          </label>
+        </div>
+      ) : (
+        <p className="text-xs text-muted">
+          Switch replies on and save to get the webhook address for your Freshdesk automation.
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" disabled={pending} className={buttonClass}>
+          {pending ? "Checking…" : "Save Freshdesk"}
+        </button>
+        <Status state={state} />
+      </div>
+    </form>
   );
 }

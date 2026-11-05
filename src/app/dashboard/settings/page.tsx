@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
 import { getActiveStore } from "@/lib/store";
 import { toFeeRates } from "@/lib/fees";
@@ -8,9 +9,11 @@ import {
   AdvisorModelForm,
   ConnectionsForm,
   FeeForm,
+  FreshdeskForm,
   SyncPanel,
 } from "@/components/settings-forms";
 import { describeAdvisorApiKey } from "@/lib/advisor/api-key";
+import { parseSupportMode } from "@/lib/support/decide";
 import { ADVISOR_MODELS, approximateTurnCost, getAdvisorModel } from "@/lib/advisor/models";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +26,13 @@ export default async function SettingsPage() {
     where: { storeId: store.id },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
   });
+  // The webhook address is wherever this dashboard is being served from.
+  const requestHeaders = await headers();
+  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
+  const protocol = requestHeaders.get("x-forwarded-proto") ?? "https";
+  const webhookUrl = host
+    ? `${protocol}://${host}/api/freshdesk/webhook?store=${encodeURIComponent(store.id)}`
+    : null;
   const logs = await prisma.syncLog.findMany({
     where: { storeId: store.id },
     orderBy: { startedAt: "desc" },
@@ -78,6 +88,20 @@ export default async function SettingsPage() {
             perTurn: approximateTurnCost(model),
             pricing: `$${model.inputPerMillion}/$${model.outputPerMillion} per million tokens`,
           }))}
+        />
+      </Card>
+
+      <Card title="Freshdesk replies">
+        <FreshdeskForm
+          settings={{
+            storeId: store.id,
+            domain: store.freshdeskDomain,
+            hasApiKey: Boolean(store.freshdeskApiKey),
+            mode: parseSupportMode(store.freshdeskMode),
+            policies: store.supportPolicies ?? "",
+            webhookUrl,
+            webhookSecret: store.freshdeskWebhookSecret,
+          }}
         />
       </Card>
 

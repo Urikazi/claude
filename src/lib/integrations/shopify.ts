@@ -743,3 +743,97 @@ function isReportsAccessError(error: ShopifyError): boolean {
     message.includes("required access")
   );
 }
+
+/** What a support reply needs to know about one of the customer's orders. */
+export type SupportOrder = {
+  name: string;
+  processedAt: string;
+  cancelledAt: string | null;
+  financialStatus: string | null;
+  fulfillmentStatus: string | null;
+  total: string;
+  items: string[];
+  fulfillments: {
+    status: string | null;
+    createdAt: string;
+    estimatedDeliveryAt: string | null;
+    tracking: { company: string | null; number: string | null; url: string | null }[];
+  }[];
+};
+
+/**
+ * The customer's most recent orders, found by the email they wrote in from.
+ *
+ * Searched by email rather than by an order number quoted in the message: the email is
+ * what the helpdesk verified, while a number anyone can type would let one customer
+ * read another's order. Filtering on email needs the app to have protected customer
+ * data access; without it Shopify refuses, the caller says so, and the reply is
+ * drafted without order details rather than not at all.
+ */
+export async function fetchOrdersByEmail(
+  credentials: ShopifyCredentials,
+  email: string,
+  limit = 5,
+): Promise<SupportOrder[]> {
+  const data = await graphql<{
+    orders: {
+      nodes: {
+        name: string;
+        processedAt: string;
+        cancelledAt: string | null;
+        displayFinancialStatus: string | null;
+        displayFulfillmentStatus: string | null;
+        totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+        lineItems: { nodes: { title: string; quantity: number; variantTitle: string | null }[] };
+        fulfillments: {
+          displayStatus: string | null;
+          createdAt: string;
+          estimatedDeliveryAt: string | null;
+          trackingInfo: { company: string | null; number: string | null; url: string | null }[];
+        }[];
+      }[];
+    };
+  }>(
+    credentials,
+    `query SupportOrders($query: String!, $first: Int!) {
+      orders(first: $first, query: $query, sortKey: PROCESSED_AT, reverse: true) {
+        nodes {
+          name
+          processedAt
+          cancelledAt
+          displayFinancialStatus
+          displayFulfillmentStatus
+          totalPriceSet { shopMoney { amount currencyCode } }
+          lineItems(first: 10) { nodes { title quantity variantTitle } }
+          fulfillments(first: 5) {
+            displayStatus
+            createdAt
+            estimatedDeliveryAt
+            trackingInfo(first: 3) { company number url }
+          }
+        }
+      }
+    }`,
+    // Quoted so an address with a plus or a dot is matched whole, not tokenised.
+    { query: `email:"${email.replace(/"/g, "")}"`, first: limit },
+  );
+
+  return data.orders.nodes.map((order) => ({
+    name: order.name,
+    processedAt: order.processedAt,
+    cancelledAt: order.cancelledAt,
+    financialStatus: order.displayFinancialStatus,
+    fulfillmentStatus: order.displayFulfillmentStatus,
+    total: `${order.totalPriceSet.shopMoney.amount} ${order.totalPriceSet.shopMoney.currencyCode}`,
+    items: order.lineItems.nodes.map(
+      (line) =>
+        `${line.quantity} x ${line.title}${line.variantTitle && line.variantTitle !== "Default Title" ? ` (${line.variantTitle})` : ""}`,
+    ),
+    fulfillments: order.fulfillments.map((fulfillment) => ({
+      status: fulfillment.displayStatus,
+      createdAt: fulfillment.createdAt,
+      estimatedDeliveryAt: fulfillment.estimatedDeliveryAt,
+      tracking: fulfillment.trackingInfo,
+    })),
+  }));
+}

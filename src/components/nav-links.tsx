@@ -15,6 +15,7 @@ const SECTIONS = [
       { href: "/dashboard/invoices", label: "Supplier invoices", icon: "▧" },
       { href: "/dashboard/advisor/cfo", label: "CFO", icon: "◆" },
       { href: "/dashboard/advisor/media-buyer", label: "Media buyer", icon: "◇" },
+      { href: "/dashboard/support", label: "Support replies", icon: "✉" },
     ],
   },
   {

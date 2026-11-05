@@ -97,6 +97,42 @@ To sync automatically every morning, set `SYNC_SECRET` and add `vercel.json`:
 with the cron sending `Authorization: Bearer $SYNC_SECRET`. Without that secret or a signed-in
 session, `/api/sync` returns 401.
 
+## Freshdesk replies
+
+Claude can answer your Freshdesk tickets. For each new customer message it reads the thread, looks
+up the customer's recent Shopify orders by the email they wrote from (status, shipments, tracking),
+applies the store policies you write, and then either:
+
+- **drafts** the reply as a private note on the ticket, tagged `claude-draft`, for an agent to
+  review and send; or
+- **sends** it to the customer, tagged `claude-sent` — only in *Send when safe* mode, and only
+  when every check passes: Claude marks it safe with high confidence, the question is order status,
+  shipping or a product question, and the message does not mention refunds, damage, chargebacks,
+  disputes or legal action. Anything else becomes a draft.
+
+Set it up under **Store settings → Freshdesk replies**:
+
+1. Paste your helpdesk domain and an agent's API key (Profile settings → View API key). Sent
+   replies appear under that agent's name.
+2. Write your policies — shipping times, returns, what to do about damaged parcels, sign-off.
+   Claude states only what is written there, and leaves anything else to the agent.
+3. Choose a mode and save. Start with **Drafts only** and read a week of drafts before turning
+   on sending.
+4. Copy the webhook URL and secret shown into a Freshdesk automation (Admin → Workflows →
+   Automations → Ticket creation → action *Trigger webhook*, POST, JSON body
+   `{"ticket_id": "{{ticket.id}}"}`, header `Authorization: Bearer <secret>`). Add the same action
+   under *Ticket updates* for "reply is sent by requester" to answer follow-ups too.
+
+Each customer message is answered once, so webhook retries and Claude's own notes do not set off a
+second reply. The **Support replies** page lists every ticket handled, what was done and why, and
+can draft a reply for any ticket on request (always a draft, never a send). It uses the same Claude
+API key and model as the advisors.
+
+Order details need the Shopify app to have **protected customer data** access, since orders are
+found by email. Without it the lookup is refused and Claude drafts without order details, saying
+what it would need to check. An order number quoted in a message is deliberately not looked up: a
+customer could quote anyone's.
+
 ## Running more than one store
 
 The sidebar names the store every report is about, and doubles as the switcher. **+ Add store**

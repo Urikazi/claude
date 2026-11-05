@@ -73,17 +73,34 @@ model Store {
   paypalClientSecret String?
   paypalLiveMode     Boolean @default(true)
 
-  feeConfig FeeConfig?
-  products  Product[]
-  orders    Order[]
-  adSpend   AdSpendEntry[]
-  metaAccounts MetaAdAccount[]
-  syncLogs  SyncLog[]
-  costTiers SupplierCostTier[]
-  traffic   DailyTraffic[]
-  changes   StoreChange[]
-  invoices  SupplierInvoice[]
+  // Freshdesk. Claude reads each new customer message and either leaves a draft as a
+  // private note for an agent to send, or replies to the customer itself.
+  /// The helpdesk subdomain, e.g. "acme" for acme.freshdesk.com.
+  freshdeskDomain        String?
+  /// An agent's API key, from Profile settings in Freshdesk. Replies are posted as
+  /// that agent, so use one whose name you are happy for customers to see.
+  freshdeskApiKey        String?
+  /// off | draft | auto. Draft never writes to a customer; auto sends only the replies
+  /// that pass every check in lib/support/decide.ts and drafts the rest.
+  freshdeskMode          String  @default("off")
+  /// Shared with the Freshdesk automation that calls the webhook. Generated, not typed.
+  freshdeskWebhookSecret String?
+  /// What Claude should know that is not in the order data: shipping times, the
+  /// returns policy, tone, how to sign off. Written by the operator.
+  supportPolicies        String?
+
+  feeConfig       FeeConfig?
+  products        Product[]
+  orders          Order[]
+  adSpend         AdSpendEntry[]
+  metaAccounts    MetaAdAccount[]
+  syncLogs        SyncLog[]
+  costTiers       SupplierCostTier[]
+  traffic         DailyTraffic[]
+  changes         StoreChange[]
+  invoices        SupplierInvoice[]
   advisorMessages AdvisorMessage[]
+  supportReplies  SupportReply[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -246,17 +263,17 @@ model MetaAdAccount {
   store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
   /// The `act_...` value from Ads Manager, normalised to carry the prefix.
-  accountId String
+  accountId   String
   /// A long-lived token holding `ads_read`. Read access only: nothing here writes
   /// to a campaign, and a token that could would be a liability, not a feature.
   accessToken String
   /// What to call it on screen. Blank falls back to the account id.
-  label String?
+  label       String?
   /// Unticked keeps the credentials but skips the account on every sync, which is
   /// how a disabled or disputed account stops erroring without being thrown away.
-  active Boolean @default(true)
+  active      Boolean @default(true)
   /// Display order, so the list does not reshuffle between saves.
-  position Int @default(0)
+  position    Int     @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -315,7 +332,7 @@ model AdvisorMessage {
   /// Which advisor this turn belongs to — "cfo" or "media-buyer". They hold separate
   /// threads: the two read different figures and give different advice, and one
   /// transcript would have each answering questions put to the other.
-  agent   String @default("cfo")
+  agent String @default("cfo")
 
   /// "user" or "assistant". Nothing else is stored: the brief lives in code, and a
   /// system turn written into the history would be an injection route.
@@ -434,4 +451,43 @@ model SupplierInvoiceLine {
   verdict  String
 
   @@index([invoiceId, verdict])
+}
+
+/// One customer message Claude has handled in Freshdesk.
+///
+/// Keyed by the message, not the ticket: a customer who writes back gets a fresh draft,
+/// while Freshdesk retrying a webhook, or our own note firing an "updated" automation,
+/// lands on a row that already exists and is ignored. That key is what stops a loop.
+model SupportReply {
+  id      String @id @default(cuid())
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  ticketId   Int
+  /// The Freshdesk id of the customer message being answered, or "ticket" for the
+  /// opening message, which Freshdesk stores on the ticket rather than as a reply.
+  messageKey String
+
+  subject        String?
+  requesterEmail String?
+
+  /// pending | note | reply | skipped | error
+  status     String  @default("pending")
+  /// order_status | shipping | returns_refunds | product_question | billing | complaint | other
+  category   String?
+  /// high | medium | low
+  confidence String?
+  /// Why it was sent, drafted or skipped, in a sentence.
+  reason     String?
+  /// The reply text Claude wrote.
+  body       String?
+  error      String?
+  /// "webhook" or "manual".
+  trigger    String  @default("webhook")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([storeId, ticketId, messageKey])
+  @@index([storeId, createdAt])
 }

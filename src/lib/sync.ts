@@ -30,7 +30,7 @@ type StoreShopifyFields = {
 };
 
 /** Either auth style is fine; the client picks whichever the store has. */
-function shopifyCredentials(store: StoreShopifyFields): shopify.ShopifyCredentials {
+export function shopifyCredentials(store: StoreShopifyFields): shopify.ShopifyCredentials {
   const hasAuth =
     store.shopifyAccessToken || (store.shopifyClientId && store.shopifyClientSecret);
   if (!store.shopifyDomain || !hasAuth) {
