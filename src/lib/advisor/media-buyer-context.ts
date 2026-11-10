@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { buildPnlReport, previousRange, type DateRange } from "@/lib/pnl";
+import { buildPnlReport, previousRange, type DateRange, calendarBounds } from "@/lib/pnl";
 
 /**
  * The figures a media buyer turn is answered from.
@@ -76,11 +76,11 @@ export async function buildMediaBuyerContext(
 
   const [entries, sessions] = await Promise.all([
     prisma.adSpendEntry.findMany({
-      where: { storeId, date: { gte: range.from, lte: range.to } },
+      where: { storeId, date: calendarBounds(range) },
       orderBy: { date: "asc" },
     }),
     prisma.dailyTraffic.aggregate({
-      where: { storeId, date: { gte: range.from, lte: range.to } },
+      where: { storeId, date: calendarBounds(range) },
       _sum: { sessions: true },
     }),
   ]);

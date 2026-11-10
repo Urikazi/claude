@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { orderNumberFromName } from "@/lib/supplier-ledger";
 import {
   estimateProcessorFee,
   normalizeGateway,
@@ -194,6 +195,7 @@ export async function syncShopifyOrders(
           storeId,
           shopifyId: order.id,
           name: order.name,
+          orderNumber: orderNumberFromName(order.name),
           currency: order.currencyCode,
           processedAt: new Date(order.processedAt),
           financialStatus: order.displayFinancialStatus,

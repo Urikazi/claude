@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { DEFAULT_TIME_ZONE, addDays, daysBetween, zonedDayKey } from "@/lib/timezone";
-import type { DateRange } from "@/lib/pnl";
+import { calendarBounds, type DateRange } from "@/lib/pnl";
 import { round2 } from "@/lib/fees";
 import { firstOrderIds } from "@/lib/customers";
 
@@ -95,11 +95,11 @@ export async function buildConversionReport(
       },
     }),
     prisma.dailyTraffic.findMany({
-      where: { storeId, date: { gte: range.from, lte: range.to } },
+      where: { storeId, date: calendarBounds(range) },
       select: { date: true, sessions: true },
     }),
     prisma.adSpendEntry.findMany({
-      where: { storeId, date: { gte: range.from, lte: range.to } },
+      where: { storeId, date: calendarBounds(range) },
       select: { date: true, clicks: true },
     }),
     firstOrderIds(storeId),

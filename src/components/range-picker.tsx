@@ -46,7 +46,7 @@ export function RangePicker() {
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      <div className="inline-flex rounded-lg border border-line bg-panel p-0.5">
+      <div className="inline-flex max-w-full flex-wrap rounded-lg border border-line bg-panel p-0.5">
         {RANGES.map((range) => (
           <button
             key={range.value}
@@ -74,7 +74,7 @@ export function RangePicker() {
       </div>
 
       {open ? (
-        <div className="inline-flex items-center gap-2 rounded-lg border border-line bg-panel px-2 py-1.5">
+        <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-lg border border-line bg-panel px-2 py-1.5">
           <input
             type="date"
             value={from}

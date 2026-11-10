@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { buildPnlReport, previousRange, type DateRange, type PnlTotals } from "@/lib/pnl";
+import { buildPnlReport, previousRange, type DateRange, type PnlTotals, calendarBounds } from "@/lib/pnl";
 import { toFeeRates } from "@/lib/fees";
 import { addDays, endOfZonedDay, startOfZonedDay, todayInZone } from "@/lib/timezone";
 
@@ -96,7 +96,7 @@ export async function buildAdvisorContext(
       take: 8,
     }),
     prisma.dailyTraffic.aggregate({
-      where: { storeId, date: { gte: range.from, lte: range.to } },
+      where: { storeId, date: calendarBounds(range) },
       _sum: { sessions: true },
     }),
   ]);
@@ -181,6 +181,21 @@ Orders by gateway: ${
       : "none"
   }
 
+### VERIFIED ACTUAL — supplier ledger (what the supplier actually billed)
+  ${
+    report.totals.billedOrders > 0
+      ? `${report.totals.billedOrders} of ${report.totals.orders} orders in this period carry the supplier's own billed cost from its payment ledger, spread over each day's order range. Their COGS is an actual, not an estimate.`
+      : "No supplier ledger covers this period's orders, so every COGS figure here is a price-list estimate."
+  }${
+    report.totals.orders > report.totals.billedOrders && report.totals.billedOrders > 0
+      ? ` The other ${report.totals.orders - report.totals.billedOrders} are not billed yet — the supplier bills a day's orders the following day — and use the price-list estimate.`
+      : ""
+  }${
+    report.totals.supplierAdjustments !== 0
+      ? ` COGS includes ${money(report.totals.supplierAdjustments)} of this store's ledger lines with no order range, booked on their ledger date.`
+      : ""
+  }
+
 ### VERIFIED ACTUAL — supplier invoices audited against the agreed price list
 ${
     invoices.length
@@ -196,7 +211,7 @@ ${
 ### ESTIMATE OR ASSUMPTION — derived, not observed
   Processor fees are modelled, not actual: Stripe/Shopify Payments at ${pct(rates.stripePercent)} + ${money(rates.stripeFixed)}, PayPal at ${pct(rates.paypalPercent)} + ${money(rates.paypalFixed)}, other gateways at ${pct(rates.defaultPercent)} + ${money(rates.defaultFixed)}.
   Shopify's own transaction fee is applied at ${pct(rates.shopifyTransactionRate)} of every order.
-  COGS comes from the supplier price list by (SKU, destination, quantity). ${tierCount} prices are loaded across ${fallbackOnly.length} SKUs. Where a destination is not quoted, the US price stands in, which reads low because the US is among the cheapest destinations on these sheets.
+  Where the ledger has not reached an order, COGS comes from the supplier price list by (SKU, destination, quantity). ${tierCount} prices are loaded across ${fallbackOnly.length} SKUs. Where a destination is not quoted, the US price stands in, which reads low because the US is among the cheapest destinations on these sheets.
   ${costedLines} order lines in this period were costed from the list; ${uncostedLines} were not costed at all.
   Platform-attributed purchases and value are Meta's own attribution over its own window. They do not reconcile to Shopify orders and must not be added to them.
 

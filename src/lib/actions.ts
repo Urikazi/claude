@@ -23,6 +23,8 @@ import { findBundledPriceList } from "@/lib/bundled-price-lists";
 // host that only ships the compiled output.
 import { ANY_COUNTRY, resolveTierSku } from "@/lib/cost-tiers";
 import { auditInvoice, parseInvoice, InvoiceFormatError } from "@/lib/invoice-audit";
+import { LedgerFormatError } from "@/lib/supplier-ledger";
+import { importSupplierLedger } from "@/lib/supplier-ledger-import";
 import { CHANGE_CATEGORIES } from "@/lib/change-categories";
 import {
   applyCostTiers,
@@ -1025,6 +1027,67 @@ export async function auditSupplierInvoice(
       ? `Checked ${audit.billedLines} billed lines — ${audit.overcharged.length} charged above the price list, ${formatVariance(audit.variance)} in total.`
       : `Checked ${audit.billedLines} billed lines — every one matches the price list.`;
   return { ok: true, message: summary };
+}
+
+/**
+ * Import the supplier's payment ledger for one store.
+ *
+ * Meant to be run daily with the same, slightly longer sheet: the import replaces the
+ * store's lines for the year, so re-uploading is the whole workflow.
+ */
+export async function uploadSupplierLedger(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  await assertSession();
+  const storeId = formData.get("storeId")?.toString();
+  const file = formData.get("ledger");
+  if (!storeId) return { ok: false, message: "Missing store." };
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, message: "Choose the ledger file to import." };
+  }
+  // The workbook itself is several megabytes of embedded screenshots, and there is no
+  // spreadsheet reader here. The sheet's own CSV export is the year's rows alone.
+  if (/\.xlsx?$/i.test(file.name)) {
+    return {
+      ok: false,
+      message:
+        "That is the Excel workbook. Open it in Google Sheets on the 2026 tab, then File > Download > Comma-separated values (.csv), and upload that file.",
+    };
+  }
+  if (file.size > 4_000_000) {
+    return { ok: false, message: "That file is over 4 MB. Export just the year's tab as CSV." };
+  }
+
+  let result;
+  try {
+    result = await importSupplierLedger(storeId, await file.text());
+  } catch (error) {
+    if (error instanceof LedgerFormatError) return { ok: false, message: error.message };
+    throw error;
+  }
+  revalidatePath("/dashboard", "layout");
+  const money = (value: number) =>
+    `${value < 0 ? "-" : ""}$${Math.abs(value).toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+  const notes = [
+    result.unmatchedBills
+      ? `${plural(result.unmatchedBills, "bill")} (${money(result.unmatchedAmount)}) cover orders older than the dashboard holds, so they land on no day.`
+      : null,
+    result.adjustments
+      ? `${plural(result.adjustments, "line")} of this store's had no readable order range and are booked on the ledger date instead (${money(result.adjustmentAmount)}).`
+      : null,
+    result.overlaps.length
+      ? `${plural(result.overlaps.length, "pair")} of bills overlap in their order ranges, each counted in full as billed: ${result.overlaps.join("; ")}.`
+      : null,
+  ].filter(Boolean);
+  return {
+    ok: true,
+    message: `Imported ${result.bills} bills through ${result.throughDate}: ${money(result.billed)} spread over ${result.ordersCosted.toLocaleString()} orders.${notes.length ? ` ${notes.join(" ")}` : ""}`,
+  };
 }
 
 const formatVariance = (value: number) =>

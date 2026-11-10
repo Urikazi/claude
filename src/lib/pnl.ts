@@ -23,6 +23,19 @@ export type PnlTotals = {
   shopifyFees: number;
   adSpend: number;
   /**
+   * Orders whose cost is the supplier's own bill rather than the price-list estimate.
+   *
+   * A day's orders are billed the next day, so the most recent day always reads on
+   * estimates; this is how a report says which of its cost figures are real.
+   */
+  billedOrders: number;
+  /**
+   * The store's own ledger lines that carry no order range — a credit for refunded
+   * quantities, a bill whose range was mistyped. Already inside `cogs`, on the ledger's
+   * date; broken out so a day that moved for this reason can be explained.
+   */
+  supplierAdjustments: number;
+  /**
    * Purchases and purchase value as the ad platform attributes them.
    *
    * Kept separate from Shopify's orders and revenue on purpose: the platform counts a
@@ -102,6 +115,8 @@ const EMPTY: Omit<
   processorFees: 0,
   shopifyFees: 0,
   adSpend: 0,
+  billedOrders: 0,
+  supplierAdjustments: 0,
   platformConversions: 0,
   platformConversionValue: 0,
   platformSpend: 0,
@@ -114,6 +129,22 @@ const EMPTY: Omit<
 
 function dayKey(date: Date, timeZone?: string): string {
   return zonedDayKey(date, timeZone ?? DEFAULT_TIME_ZONE);
+}
+
+/**
+ * The bounds for rows dated by calendar day rather than by instant.
+ *
+ * Ad spend, sessions and supplier ledger lines are stored at UTC midnight of the date
+ * they belong to. The report range runs from the store's own midnight, which for a
+ * store west of UTC falls hours after UTC midnight — so filtering those rows by the
+ * range itself drops the first day and picks up the day after the last. Bounding them
+ * by the range's first and last calendar dates instead keeps exactly the days shown.
+ */
+export function calendarBounds(range: DateRange): { gte: Date; lte: Date } {
+  return {
+    gte: new Date(`${dayKey(range.from, range.timeZone)}T00:00:00.000Z`),
+    lte: new Date(`${dayKey(range.to, range.timeZone)}T00:00:00.000Z`),
+  };
 }
 
 /**
@@ -142,6 +173,7 @@ function finalize(base: typeof EMPTY): PnlTotals {
     taxes: round2(base.taxes),
     netRevenue: round2(base.netRevenue),
     cogs: round2(base.cogs),
+    supplierAdjustments: round2(base.supplierAdjustments),
     shippingCost: round2(base.shippingCost),
     handlingCost: round2(base.handlingCost),
     processorFees: round2(base.processorFees),
@@ -182,7 +214,7 @@ export async function buildPnlReport(
   storeId: string,
   range: DateRange,
 ): Promise<PnlReport> {
-  const [orders, adSpend, firstIds] = await Promise.all([
+  const [orders, adSpend, firstIds, ledgerAdjustments] = await Promise.all([
     prisma.order.findMany({
       where: {
         storeId,
@@ -192,9 +224,18 @@ export async function buildPnlReport(
       orderBy: { processedAt: "asc" },
     }),
     prisma.adSpendEntry.findMany({
-      where: { storeId, date: { gte: range.from, lte: range.to } },
+      where: { storeId, date: calendarBounds(range) },
     }),
     firstOrderIds(storeId),
+    // Ledger lines that are the store's but name no orders, so they cannot ride on an
+    // order's cost and are booked on the date the ledger gives them.
+    prisma.supplierLedgerEntry.findMany({
+      where: {
+        storeId,
+        kind: { in: ["credit", "charge"] },
+        date: calendarBounds(range),
+      },
+    }),
   ]);
 
   // Without a customer on any order there is no first purchase to find, and reporting
@@ -225,8 +266,12 @@ export async function buildPnlReport(
     let shippingCost = 0;
     let handlingCost = 0;
     let units = 0;
+    // What the supplier actually billed for this order, where its ledger has reached
+    // it. All-in, like a tier price, so it replaces the estimate rather than adding to it.
+    const billed = order.supplierCostActual;
     for (const item of order.lineItems) {
       units += item.quantity;
+      if (billed !== null) continue;
       if (item.lineCost !== null) {
         // Supplier tier price: one all-in total for the line, already covering
         // shipping, so it must not be scaled by quantity again.
@@ -237,6 +282,8 @@ export async function buildPnlReport(
         handlingCost += item.unitHandling * item.quantity;
       }
     }
+
+    if (billed !== null) cogs = billed;
 
     const isFirstPurchase = customersKnown && firstIds.has(order.id);
 
@@ -257,6 +304,7 @@ export async function buildPnlReport(
       target.taxes += order.taxTotal;
       target.netRevenue += netRevenue;
       target.cogs += cogs;
+      if (billed !== null) target.billedOrders += 1;
       target.shippingCost += shippingCost;
       target.handlingCost += handlingCost;
       target.processorFees += processorFee;
@@ -284,6 +332,14 @@ export async function buildPnlReport(
       entry.platform,
       (spendByPlatform.get(entry.platform) ?? 0) + entry.spend,
     );
+  }
+
+  for (const entry of ledgerAdjustments) {
+    const day = bucket(adSpendDayKey(entry.date));
+    for (const target of [totals, day]) {
+      target.cogs += entry.amount;
+      target.supplierAdjustments += entry.amount;
+    }
   }
 
   const daily: PnlDaily[] = [];

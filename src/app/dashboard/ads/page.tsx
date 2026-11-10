@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { getActiveStore } from "@/lib/store";
-import { buildPnlReport, newCustomerCost, newCustomerRoas } from "@/lib/pnl";
+import { buildPnlReport, newCustomerCost, newCustomerRoas, calendarBounds } from "@/lib/pnl";
 import { formatDate, formatMoney, formatNumber, resolveRange } from "@/lib/format";
 import { round2 } from "@/lib/fees";
 import { Card, Empty, Stat, Td, Th } from "@/components/ui";
@@ -23,7 +23,7 @@ export default async function AdsPage({
   const range = resolveRange(rangeParam, from, to, store.timezone);
   const currency = store.currency;
 
-  const where = { storeId: store.id, date: { gte: range.from, lte: range.to } };
+  const where = { storeId: store.id, date: calendarBounds(range) };
   const [report, entries, grouped, byAccount, accounts, lastMetaSync] = await Promise.all([
     buildPnlReport(store.id, range),
     // The daily list is a recent-activity view and says so; the figures above it are

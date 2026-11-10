@@ -83,6 +83,7 @@ model Store {
   traffic   DailyTraffic[]
   changes   StoreChange[]
   invoices  SupplierInvoice[]
+  supplierLedger SupplierLedgerEntry[]
   advisorMessages AdvisorMessage[]
 
   createdAt DateTime @default(now())
@@ -161,6 +162,9 @@ model Order {
   store     Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
   shopifyId String?
   name      String? // #1001
+  /// The digits of the name: #95674 is 95674. The supplier's ledger bills by
+  /// order-number range, and this is how a bill finds the orders it covers.
+  orderNumber Int?
   currency  String  @default("USD")
 
   processedAt     DateTime
@@ -198,6 +202,12 @@ model Order {
   /// Shopify transaction fee (0.6% by default).
   shopifyFee           Float  @default(0)
 
+  /// What the supplier actually charged for this order — product and shipping — as
+  /// its payment ledger records it. A day's bill covers a range of orders and is spread
+  /// over them by their price-list cost. Null until a bill covers the order, and the
+  /// price-list estimate stands in until then, the same way the processor fee does.
+  supplierCostActual Float?
+
   lineItems OrderLineItem[]
 
   createdAt DateTime @default(now())
@@ -206,6 +216,7 @@ model Order {
   @@unique([storeId, shopifyId])
   @@index([storeId, processedAt])
   @@index([storeId, customerId])
+  @@index([storeId, orderNumber])
 }
 
 model OrderLineItem {
@@ -434,4 +445,38 @@ model SupplierInvoiceLine {
   verdict  String
 
   @@index([invoiceId, verdict])
+}
+
+/// One line of the supplier's running payment ledger.
+///
+/// The ledger is cumulative and the supplier edits past rows, so it is re-imported
+/// whole each time rather than appended to: a year's lines are replaced together.
+model SupplierLedgerEntry {
+  id      String  @id @default(cuid())
+  /// Null for lines the ledger does not tie to a store of ours: cancellation credits,
+  /// sample shipping, packaging, creator fees, other brands' bills.
+  storeId String?
+  store   Store?  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  /// UTC midnight of the date the ledger gives the line.
+  date      DateTime
+  /// bill | credit | charge | payment
+  kind      String
+  /// The ledger's own wording: the store on a bill, the description on anything else.
+  label     String
+  /// The order range on a bill, or the payment reference.
+  reference String?
+  firstOrder Int?
+  lastOrder  Int?
+  /// Cost to the business: positive for a bill or a charge, negative for a credit.
+  /// On a payment, the cash sent to the supplier — not a cost at all.
+  amount    Float
+  /// Orders in the dashboard the bill was spread across. Zero for a bill whose orders
+  /// were never synced, which therefore lands on no day's P&L.
+  matchedOrders Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([storeId, date])
+  @@index([date])
 }
